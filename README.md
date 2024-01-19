@@ -1,4 +1,6 @@
 # CSIP
+安装[RainbowNeko Engine](https://github.com/IrisRainbowNeko/RainbowNekoEngine).
+
 修改`cfgs/py/train/contrastive/csip.py`中数据和训练相关配置。
 
 启动训练
