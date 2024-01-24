@@ -16,6 +16,7 @@ from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
 from rainbowneko.train.loss import MLCEImageLoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
+from rainbowneko.train.loggers import CLILogger, TBLogger
 
 from model import CAFormerBackbone
 
@@ -88,6 +89,11 @@ config = dict(
         metrics=None,
     ),
 
+    logger=[
+        partial(CLILogger, out_path='train.log', log_step=20),
+        partial(TBLogger, out_path='tb', log_step=20),
+    ],
+
     model=dict(
         name='csip-caformer-m36',
         wrapper=partial(SingleWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
@@ -99,7 +105,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip',
+                    img_root=r'/data/csip_tiny',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
