@@ -99,7 +99,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'E:\dataset\csip\dataset_p12',
+                    img_root=r'/data/csip',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
