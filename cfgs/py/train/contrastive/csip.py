@@ -60,6 +60,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
+    exp_dir='exps/csip_test_tiny',
     model_part=[
         dict(
             lr=1e-3,
