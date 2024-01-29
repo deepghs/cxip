@@ -60,10 +60,10 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_test_tiny',
+    exp_dir='exps/csip_test_tiny_lr2e-4_e500_bs32_cwr',
     model_part=[
         dict(
-            lr=1e-3,
+            lr=2e-4,
             layers=[''],  # train all layers
         )
     ],
@@ -73,7 +73,7 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=100,
+        train_epochs=500,
         workers=2,
         max_grad_norm=None,
         save_step=2000,
@@ -84,8 +84,11 @@ config = dict(
 
         scale_lr=False,
         scheduler=dict(
-            name='cosine',
+            name='cosine_with_restarts',
             num_warmup_steps=100,
+            num_cycles=4,
+            # name='cosine',
+            # num_warmup_steps=100,
         ),
         metrics=None,
     ),
@@ -103,7 +106,7 @@ config = dict(
     evaluator=None,
 
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=32, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/data/csip_tiny',
