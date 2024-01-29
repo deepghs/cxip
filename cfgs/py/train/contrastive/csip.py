@@ -7,7 +7,7 @@ import torchvision
 from torchvision import transforms
 from torchvision.transforms import RandAugment
 from torch.nn import CrossEntropyLoss
-from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
+from torchmetrics.classification import MulticlassAccuracy, AveragePrecision
 
 from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
 from rainbowneko.models.wrapper import SingleWrapper
@@ -18,6 +18,7 @@ from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
 
 from model import CAFormerBackbone
+from evaluate import CSIPmAPContainer
 
 num_classes = 10
 
@@ -49,6 +50,13 @@ TRAIN_TRANSFORM = transforms.Compose([
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
     transforms.RandomResizedCrop(384),
+    transforms.ToTensor(),
+    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+])
+
+EVAL_TRANSFORM = transforms.Compose([
+    transforms.Resize(384),
+    transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
@@ -93,13 +101,17 @@ config = dict(
         wrapper=partial(SingleWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
     ),
 
-    evaluator=None,
+    evaluator=partial(EvaluatorGroup, interval=500,
+        evaluator_dict=dict(
+            AP=CSIPmAPContainer(AveragePrecision(task="binary")),
+        )
+    ),
 
     data_train=dict(
         dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip',
+                    img_root=r'/data/csip/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -107,5 +119,15 @@ config = dict(
         )
     ),
 
-    data_eval=None,
+    data_eval=dict(
+        dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
+            source=dict(
+                data_source1=ImageFolderClassSource(
+                    img_root=r'/data/csip/eval',
+                    image_transforms=EVAL_TRANSFORM,
+                ),
+            ),
+            bucket=PosNegBucket(target_size=384, pos_rate=0.5),
+        )
+    ),
 )
