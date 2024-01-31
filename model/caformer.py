@@ -18,4 +18,4 @@ class CAFormerBackbone(nn.Module):
         x = self.caformer.forward_features(x)
         feat = self.attnpool(x)
         out = self.sim(feat) # [B,B]
-        return out, feat
+        return out, feat+0.*out.mean() # 0.*out.mean() for DDP
