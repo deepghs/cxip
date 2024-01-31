@@ -69,7 +69,7 @@ config = dict(
 
     model_part=[
         dict(
-            lr=1e-3,
+            lr=1e-4,
             layers=[''],  # train all layers
         )
     ],
@@ -101,7 +101,7 @@ config = dict(
         wrapper=partial(SingleWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
     ),
 
-    evaluator=partial(EvaluatorGroup, interval=500,
+    evaluator=partial(EvaluatorGroup, interval=100,
         evaluator_dict=dict(
             AP=CSIPmAPContainer(AveragePrecision(task="binary")),
         )
@@ -111,7 +111,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip/train',
+                    img_root=r'/root/autodl-tmp/datas/csip/p12',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -123,7 +123,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip/eval',
+                    img_root=r'/root/autodl-tmp/datas/csip/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
