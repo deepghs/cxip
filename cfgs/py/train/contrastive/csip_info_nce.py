@@ -84,7 +84,7 @@ config = dict(
         max_grad_norm=None,
         save_step=2000,
 
-        loss=partial(MLCEImageLoss),
+        loss=partial(InfoNCELoss),
 
         optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
 

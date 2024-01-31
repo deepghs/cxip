@@ -16,6 +16,6 @@ class CAFormerBackbone(nn.Module):
 
     def forward(self, x):
         x = self.caformer.forward_features(x)
-        x = self.attnpool(x)
-        x = self.sim(x) # [B,B]
-        return x
+        feat = self.attnpool(x)
+        out = self.sim(feat) # [B,B]
+        return out, feat
