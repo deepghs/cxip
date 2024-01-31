@@ -10,3 +10,8 @@ neko_train --cfg cfgs/py/train/contrastive/csip.py
 # 单卡
 neko_train_1gpu --cfg cfgs/py/train/contrastive/csip.py
 ```
+
+换InfoNCE Loss:
+```bash
+neko_train --cfg cfgs/py/train/contrastive/csip_info_nce.py
+```
