@@ -1,1 +1,1 @@
-from .caformer import CAFormerBackbone
+from .caformer import CAFormerBackbone, CAFormerStyleBackbone
