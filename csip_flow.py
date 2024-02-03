@@ -16,10 +16,16 @@ EVAL_TRANSFORM = transforms.Compose([
 actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
     BuildModelAction(partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))),
-    LoadModelAction(''),
+    LoadModelAction({'model': 'ckpts/csip-caformer-m36-7800.ckpt'}),
 
     LoadImageAction(
-        image_paths=[],
+        image_paths=[
+            'imgs/113389072_p0_master1200.jpg',
+            'imgs/113901432_p0_master1200.jpg',
+            'imgs/115706741_p0_master1200.jpg',
+            'imgs/1.jpg',
+            'imgs/2.jpg'
+        ],
         image_transforms=EVAL_TRANSFORM,
     ),
     ForwardAction(),
