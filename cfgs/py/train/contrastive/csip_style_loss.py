@@ -20,13 +20,6 @@ from rainbowneko.ckpt_manager import CkptManagerPKL
 from model import CAFormerStyleBackbone
 from evaluate import CSIPmAPContainer
 
-num_classes = 10
-
-def load_resnet():
-    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
-
 class WeakRandAugment2(transforms.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
         return {
