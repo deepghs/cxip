@@ -45,6 +45,5 @@ class CAFormerStyleBackbone(nn.Module):
         x = self.caformer.forward_features(x)
 
         feat_all = self.feat_list.copy()
-        feat_all[-1] = feat_all
         self.feat_list.clear()
         return x, feat_all
