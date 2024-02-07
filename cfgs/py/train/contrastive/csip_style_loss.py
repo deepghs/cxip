@@ -18,7 +18,7 @@ from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
 
 from model import CAFormerStyleBackbone
-from evaluate import CSIPmAPContainer
+from evaluate import CSIPTripletAPContainer
 
 class WeakRandAugment2(transforms.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
@@ -75,7 +75,6 @@ config = dict(
         train_epochs=100,
         workers=2,
         max_grad_norm=None,
-        retain_graph=False,
         save_step=2000,
 
         loss=partial(StyleLoss),
@@ -97,7 +96,7 @@ config = dict(
 
     evaluator=partial(EvaluatorGroup, interval=100,
         evaluator_dict=dict(
-            AP=CSIPmAPContainer(AveragePrecision(task="binary")),
+            AP=CSIPTripletAPContainer(AveragePrecision(task="binary")),
         )
     ),
 
