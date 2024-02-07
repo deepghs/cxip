@@ -28,7 +28,7 @@ class CAFormerStyleBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36'):
         super().__init__()
         caformer = create_model(model_name, pretrained=True)
-        caformer.set_grad_checkpointing(True)
+        #caformer.set_grad_checkpointing(True)
         del caformer.head
         self.caformer = caformer
 
