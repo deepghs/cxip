@@ -61,7 +61,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_test_tiny_lr1e-4_e500_bs24_styleloss',
+    exp_dir='exps/csip_test_tiny_lr2e-4_e500_bs24_styleloss',
     model_part=[
         dict(
             lr=2e-4,
