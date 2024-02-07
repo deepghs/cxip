@@ -62,7 +62,7 @@ config = dict(
 
     model_part=[
         dict(
-            lr=1e-4,
+            lr=2e-4,
             layers=[''],  # train all layers
         )
     ],

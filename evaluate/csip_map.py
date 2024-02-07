@@ -40,8 +40,8 @@ class CSIPTripletAPContainer(EvaluatorContainer):
             sim_pos = sum(self.style_sim(q, pos) for q, pos in zip(query, positive_key)) / len(query)
             sim_neg = sum(self.style_sim(q, neg) for q, neg in zip(query, negative_keys)) / len(query)
 
-            self.pred_list.append(sim_pos.cpu())
-            self.pred_list.append(sim_neg.cpu())
+            self.pred_list.append(1.-sim_pos.cpu())
+            self.pred_list.append(1.-sim_neg.cpu())
             self.target_list.append(torch.ones(len(query[0]), device='cpu', dtype=torch.long))
             self.target_list.append(torch.zeros(len(query[0]), device='cpu', dtype=torch.long))
 
