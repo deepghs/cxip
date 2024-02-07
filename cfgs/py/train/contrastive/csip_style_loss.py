@@ -16,6 +16,7 @@ from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
 from rainbowneko.train.loss import StyleLoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
+from rainbowneko.train.loggers import CLILogger, TBLogger
 
 from model import CAFormerStyleBackbone
 from evaluate import CSIPTripletAPContainer
@@ -60,6 +61,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
+    exp_dir='exps/csip_test_tiny_lr1e-4_e500_bs24_styleloss',
     model_part=[
         dict(
             lr=2e-4,
@@ -72,7 +74,7 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=100,
+        train_epochs=500,
         workers=2,
         max_grad_norm=None,
         save_step=2000,
@@ -88,6 +90,11 @@ config = dict(
         ),
         metrics=None,
     ),
+
+    logger=[
+        partial(CLILogger, out_path='train.log', log_step=20),
+        partial(TBLogger, out_path='tb', log_step=20),
+    ],
 
     model=dict(
         name='csip-caformer-m36',
@@ -105,7 +112,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/p12',
+                    img_root=r'/data/csip_tiny',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -117,7 +124,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/eval',
+                    img_root=r'/data/csip_tiny_eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
