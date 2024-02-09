@@ -64,7 +64,10 @@ class CAFormerStyleBackbone(nn.Module):
 class CAFormerCatBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
         super().__init__()
-        caformer = create_model(model_name, pretrained=True)
+        try:
+            caformer = create_model(model_name, pretrained=True)
+        except:
+            caformer = create_model(model_name, pretrained=False)
         caformer.set_grad_checkpointing(True)
         del caformer.head
         self.caformer = caformer

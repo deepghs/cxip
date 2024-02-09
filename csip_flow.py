@@ -3,7 +3,7 @@ from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, Vi
     PrepareAction, LoadModelAction, BasicAction, feedback_input
 from torchvision import transforms
 from rainbowneko.models.wrapper import FeatWrapper
-from model import CAFormerBackbone
+from model import CAFormerCatBackbone
 from functools import partial
 from einops import repeat
 
@@ -22,12 +22,13 @@ class CatImageAction(BasicAction):
             repeat(input['x'], 'b c h w -> (b n) c h w', n=bs),
             repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
         ], dim=2)
+        print(input['x'].shape)
         return {'input': input}
 
 actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
-    BuildModelAction(partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))),
-    LoadModelAction({'model': 'ckpts/csip-caformer-m36-7800.ckpt'}),
+    BuildModelAction(partial(FeatWrapper, model=CAFormerCatBackbone('caformer_s18', input_resolution=224))),
+    LoadModelAction({'model': 'exps/csip_cat_s18/ckpts/csip-caformer-s18-3000.ckpt'}),
 
     LoadImageAction(
         image_paths=[
@@ -35,7 +36,8 @@ actions=[
             'imgs/113901432_p0_master1200.jpg',
             'imgs/115706741_p0_master1200.jpg',
             'imgs/1.jpg',
-            'imgs/2.jpg'
+            'imgs/2.jpg',
+            'imgs/3.jpg',
         ],
         image_transforms=EVAL_TRANSFORM,
     ),

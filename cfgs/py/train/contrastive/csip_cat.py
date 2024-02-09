@@ -43,14 +43,14 @@ TRAIN_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
-    transforms.RandomCrop(384),
+    transforms.RandomCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
-    transforms.CenterCrop(384),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
@@ -61,7 +61,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_cat',
+    exp_dir='exps/csip_cat_s18',
     model_part=[
         dict(
             lr=2e-4,
@@ -74,10 +74,10 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=50,
+        train_epochs=20,
         workers=2,
         max_grad_norm=None,
-        save_step=2000,
+        save_step=1000,
 
         loss=partial(StyleBCELoss),
 
@@ -97,8 +97,8 @@ config = dict(
     ],
 
     model=dict(
-        name='csip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerCatBackbone('caformer_m36'))
+        name='csip-caformer-s18',
+        wrapper=partial(FeatWrapper, model=CAFormerCatBackbone('caformer_s18'))
     ),
 
     evaluator=partial(EvaluatorGroup, interval=200,
@@ -116,7 +116,7 @@ config = dict(
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=384),
+            bucket=TripletBucket(target_size=224),
         )
     ),
 
@@ -128,7 +128,7 @@ config = dict(
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=384),
+            bucket=TripletBucket(target_size=224),
         )
     ),
 )
