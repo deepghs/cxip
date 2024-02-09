@@ -58,7 +58,10 @@ class CAFormerCatBackbone(nn.Module):
         self.caformer = caformer
 
         self.attnpool = AvgAttnPooling2d(caformer.num_features)
-        self.sig = nn.Sigmoid()
+        self.out_layers = nn.Sequential(
+            nn.Linear(caformer.num_features, 1),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
         anchor, pos, neg = x.chunk(3)
@@ -69,5 +72,5 @@ class CAFormerCatBackbone(nn.Module):
 
         x = self.caformer.forward_features(x)
         feat = self.attnpool(x).flatten(1)
-        out = self.sig(feat)
+        out = self.out_layers(feat)
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
