@@ -74,7 +74,7 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=500,
+        train_epochs=50,
         workers=2,
         max_grad_norm=None,
         save_step=2000,
@@ -109,7 +109,7 @@ config = dict(
 
     # batch_size要是3的倍数
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/root/autodl-tmp/datas/csip/train',
@@ -121,10 +121,10 @@ config = dict(
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_tiny_eval',
+                    img_root=r'/root/autodl-tmp/datas/csip/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),

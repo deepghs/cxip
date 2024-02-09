@@ -71,6 +71,6 @@ class CAFormerCatBackbone(nn.Module):
         x = torch.cat([a_pos, a_neg])
 
         x = self.caformer.forward_features(x)
-        feat = self.attnpool(x).flatten(1)
-        out = self.out_layers(feat)
+        feat = self.attnpool(x)
+        out = self.out_layers(feat).flatten()
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP

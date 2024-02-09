@@ -13,6 +13,6 @@ class StyleBCELoss(LossContainer):
     def forward(self, pred, target):
         input_tensor = pred['pred']
         # target_tensor = target['label']
-        target_tensor = torch.cat([torch.ones(len(input_tensor) // 2), torch.zeros(len(input_tensor) // 2)])
+        target_tensor = torch.cat([torch.ones(len(input_tensor) // 2), torch.zeros(len(input_tensor) // 2)]).to(input_tensor.device)
 
         return self.bce_loss(input_tensor, target_tensor)
