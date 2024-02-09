@@ -18,11 +18,8 @@ class CatImageAction(BasicAction):
     @feedback_input
     def forward(self, input, **states):
         bs = input['x'].shape[0]
-        input['x'] = torch.cat([
-            repeat(input['x'], 'b c h w -> (b n) c h w', n=bs),
-            repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
-        ], dim=2)
-        print(input['x'].shape)
+        input['x_ref'] = repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
+        input['x'] = repeat(input['x'], 'b c h w -> (b n) c h w', n=bs)
         return {'input': input}
 
 actions=[

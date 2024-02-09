@@ -78,12 +78,15 @@ class CAFormerCatBackbone(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x):
-        anchor, pos, neg = x.chunk(3)
+    def forward(self, x, x_ref=None):
+        if x_ref is None:
+            anchor, pos, neg = x.chunk(3)
 
-        a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
-        a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
-        x = torch.cat([a_pos, a_neg])
+            a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
+            a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
+            x = torch.cat([a_pos, a_neg])
+        else:
+            x = torch.cat([x, x_ref], dim=2)
 
         x = self.caformer.forward_features(x)
         feat = self.attnpool(x)
