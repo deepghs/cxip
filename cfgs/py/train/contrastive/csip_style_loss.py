@@ -30,25 +30,25 @@ class WeakRandAugment2(transforms.RandAugment):
             "TranslateX":(torch.linspace(0.0, 0.08*image_size[1], num_bins), True),
             "TranslateY":(torch.linspace(0.0, 0.08*image_size[0], num_bins), True),
             "Rotate":(torch.linspace(0.0, 30.0, num_bins), True),
-            "Brightness":(torch.linspace(0.0, 0.5, num_bins), True),
-            "Contrast":(torch.linspace(0.0, 0.05, num_bins), True),
-            "Sharpness":(torch.linspace(0.0, 0.5, num_bins), True),
-            "Posterize":(8-(torch.arange(num_bins)/((num_bins-1)/4)).round().int(), False),
-            "AutoContrast":(torch.tensor(0.0), False),
-            "Equalize":(torch.tensor(0.0), False),
+            #"Brightness":(torch.linspace(0.0, 0.5, num_bins), True),
+            #"Contrast":(torch.linspace(0.0, 0.05, num_bins), True),
+            #"Sharpness":(torch.linspace(0.0, 0.5, num_bins), True),
+            #"Posterize":(8-(torch.arange(num_bins)/((num_bins-1)/4)).round().int(), False),
+            #"AutoContrast":(torch.tensor(0.0), False),
+            #"Equalize":(torch.tensor(0.0), False),
         }
 
 TRAIN_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
-    transforms.RandomResizedCrop(384),
+    transforms.RandomCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(384),
+    transforms.Resize(512),
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
@@ -94,7 +94,7 @@ config = dict(
         wrapper=partial(FeatWrapper, model=CAFormerStyleBackbone('caformer_m36'))
     ),
 
-    evaluator=partial(EvaluatorGroup, interval=100,
+    evaluator=partial(EvaluatorGroup, interval=200,
         evaluator_dict=dict(
             AP=CSIPTripletAPContainer(AveragePrecision(task="binary")),
         )
@@ -105,7 +105,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/p12',
+                    img_root=r'/root/autodl-tmp/datas/csip/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
