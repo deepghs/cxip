@@ -1,4 +1,5 @@
 from torch import nn
+import torch
 from timm import create_model
 from torch import nn
 from rainbowneko.models.layers import BatchCosineSimilarity
@@ -47,3 +48,26 @@ class CAFormerStyleBackbone(nn.Module):
         feat_all = self.feat_list.copy()
         self.feat_list.clear()
         return x, feat_all
+
+class CAFormerCatBackbone(nn.Module):
+    def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
+        super().__init__()
+        caformer = create_model(model_name, pretrained=True)
+        caformer.set_grad_checkpointing(True)
+        del caformer.head
+        self.caformer = caformer
+
+        self.attnpool = AvgAttnPooling2d(caformer.num_features)
+        self.sig = nn.Sigmoid()
+
+    def forward(self, x):
+        anchor, pos, neg = x.chunk(3)
+
+        a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
+        a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
+        x = torch.cat([a_pos, a_neg])
+
+        x = self.caformer.forward_features(x)
+        feat = self.attnpool(x).flatten(1)
+        out = self.sig(feat)
+        return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP

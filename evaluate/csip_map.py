@@ -49,3 +49,19 @@ class CSIPTripletAPContainer(EvaluatorContainer):
         pred = torch.cat(self.pred_list) #[N]
         target = torch.cat(self.target_list) #[N]
         return self.evaluator(pred, target)
+
+class CSIP_PN_APContainer(EvaluatorContainer):
+    def reset(self):
+        self.pred_list = []
+        self.target_list = []
+
+    def update(self, pred, target):
+        for pred_cudai, target_cudai in zip(pred['pred'], target['label']):
+            self.pred_list.append(pred_cudai.cpu())
+            self.target_list.append(torch.ones(len(pred_cudai)//2, device='cpu', dtype=torch.long))
+            self.target_list.append(torch.zeros(len(pred_cudai)//2, device='cpu', dtype=torch.long))
+
+    def evaluate(self):
+        pred = torch.cat(self.pred_list) #[N,B]
+        target = torch.cat(self.target_list) #[N]
+        return self.evaluator(pred, target)
