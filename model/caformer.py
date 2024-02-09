@@ -1,11 +1,23 @@
 from torch import nn
 import torch
 from timm import create_model
+from timm.models import register_model
+from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, _create_metaformer
 from torch import nn
 from rainbowneko.models.layers import BatchCosineSimilarity
 
 from .attention_pool import AvgAttnPooling2d
 
+
+@register_model
+def caformer_t15(pretrained=False, **kwargs) -> MetaFormer:
+    model_kwargs = dict(
+        depths=[3, 3, 6, 3],
+        dims=[64, 128, 192, 256],
+        token_mixers=[SepConv, SepConv, Attention, Attention],
+        norm_layers=[LayerNorm2dNoBias] * 2 + [LayerNormNoBias] * 2,
+        **kwargs)
+    return _create_metaformer('caformer_t15', pretrained=pretrained, **model_kwargs)
 
 class CAFormerBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
