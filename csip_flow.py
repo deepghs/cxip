@@ -32,7 +32,7 @@ actions=[
             'imgs/113389072_p0_master1200.jpg',
             'imgs/113901432_p0_master1200.jpg',
             'imgs/115706741_p0_master1200.jpg',
-            #'imgs/1.jpg',
+            'imgs/1.jpg',
             'imgs/2.jpg',
             'imgs/3.jpg',
         ],
