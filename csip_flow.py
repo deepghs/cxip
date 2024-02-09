@@ -1,9 +1,11 @@
 import torch
-from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, VisPredAction, BuildModelAction, PrepareAction, LoadModelAction
+from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, VisPredAction, BuildModelAction, \
+    PrepareAction, LoadModelAction, BasicAction, feedback_input
 from torchvision import transforms
 from rainbowneko.models.wrapper import FeatWrapper
 from model import CAFormerBackbone
 from functools import partial
+from einops import repeat
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(384),
@@ -12,6 +14,15 @@ EVAL_TRANSFORM = transforms.Compose([
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
 
+class CatImageAction(BasicAction):
+    @feedback_input
+    def forward(self, input, **states):
+        bs = input['x'].shape[0]
+        input['x'] = torch.cat([
+            repeat(input['x'], 'b c h w -> (b n) c h w', n=bs),
+            repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
+        ], dim=2)
+        return {'input': input}
 
 actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
@@ -28,6 +39,7 @@ actions=[
         ],
         image_transforms=EVAL_TRANSFORM,
     ),
+    CatImageAction(),
     ForwardAction(),
     VisPredAction(),
 ]
