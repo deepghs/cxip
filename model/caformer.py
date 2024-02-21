@@ -5,6 +5,7 @@ from timm.models import register_model
 from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, _create_metaformer
 from torch import nn
 from rainbowneko.models.layers import BatchCosineSimilarity
+from .attention import SDP_Attention
 
 from .attention_pool import AvgAttnPooling2d
 
@@ -89,6 +90,42 @@ class CAFormerCatBackbone(nn.Module):
             x = torch.cat([x, x_ref], dim=2)
 
         x = self.caformer.forward_features(x)
+        feat = self.attnpool(x)
+        out = self.out_layers(feat).flatten()
+        return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
+
+class CAFormerCrossBackbone(nn.Module):
+    def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
+        super().__init__()
+        try:
+            caformer = create_model(model_name, pretrained=True)
+        except:
+            caformer = create_model(model_name, pretrained=False)
+        caformer.set_grad_checkpointing(True)
+        del caformer.head
+        self.caformer = caformer
+
+        self.cross_attn = SDP_Attention(caformer.num_features)
+
+        self.attnpool = AvgAttnPooling2d(caformer.num_features)
+        self.out_layers = nn.Sequential(
+            nn.Linear(caformer.num_features, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x, x_ref=None):
+        x = self.caformer.forward_features(x)
+
+        if x_ref is None:
+            anchor, pos, neg = x.chunk(3)
+
+            a_pos = self.cross_attn(anchor, pos, pos)
+            a_neg = self.cross_attn(anchor, neg, neg)
+
+            x = torch.cat([a_pos, a_neg])
+        else:
+            x = self.cross_attn(x, x_ref, x_ref)
+
         feat = self.attnpool(x)
         out = self.out_layers(feat).flatten()
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP

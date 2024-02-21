@@ -17,6 +17,8 @@ EVAL_TRANSFORM = transforms.Compose([
 class CatImageAction(BasicAction):
     @feedback_input
     def forward(self, input, **states):
+        import math
+        
         bs = input['x'].shape[0]
         input['x_ref'] = repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
         input['x'] = repeat(input['x'], 'b c h w -> (b n) c h w', n=bs)
