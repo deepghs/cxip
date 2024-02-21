@@ -43,10 +43,14 @@ class SDP_Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, q, k, v):
-        B, N, C = q.shape
-        q = rearrange(self.to_q(q), 'b n (nh h) -> b nh n h')
-        k = rearrange(self.to_k(k), 'b n (nh h) -> b nh n h')
-        v = rearrange(self.to_v(v), 'b n (nh h) -> b nh n h')
+        B, C, H, W = q.shape
+        q = rearrange(q, 'b c h w -> b (h w) c')
+        k = rearrange(k, 'b c h w -> b (h w) c')
+        v = rearrange(v, 'b c h w -> b (h w) c')
+
+        q = rearrange(self.to_q(q), 'b n (nh h) -> b nh n h', nh=self.num_heads)
+        k = rearrange(self.to_k(k), 'b n (nh h) -> b nh n h', nh=self.num_heads)
+        v = rearrange(self.to_v(v), 'b n (nh h) -> b nh n h', nh=self.num_heads)
 
         if self.fused_attn:
             x = F.scaled_dot_product_attention(
@@ -59,7 +63,8 @@ class SDP_Attention(nn.Module):
             attn = self.attn_drop(attn)
             x = attn @ v
 
-        x = x.transpose(1, 2).reshape(B, N, C)
+        x = rearrange(x, 'b nh n h -> b n (nh h)')
         x = self.proj(x)
         x = self.proj_drop(x)
+        x = rearrange(x, 'b (h w) c -> b c h w', h=H)
         return x
