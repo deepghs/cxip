@@ -82,6 +82,6 @@ class SDP_Attention(nn.Module):
 
         x = rearrange(x, 'b nh n h -> b n (nh h)')
         x = self.proj(x)
-        x = self.proj_drop(x)
+        x = self.proj_drop(x) + self.ffn(x)
         x = rearrange(x, 'b (h w) c -> b c h w', h=H)
-        return x + self.ffn(x)
+        return x
