@@ -3,6 +3,7 @@ from timm.layers import use_fused_attn
 from typing import Final
 import torch.nn.functional as F
 from einops import rearrange
+import torch
 
 class SDP_Attention(nn.Module):
     """
@@ -20,6 +21,7 @@ class SDP_Attention(nn.Module):
             attn_drop=0.,
             proj_drop=0.,
             proj_bias=False,
+            ffn_expand=3.,
             **kwargs
     ):
         super().__init__()
@@ -41,6 +43,21 @@ class SDP_Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(self.attention_dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
+
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, int(dim * ffn_expand)),
+            nn.GELU(),
+            nn.LayerNorm(int(dim * ffn_expand)),
+            nn.Linear(int(dim * ffn_expand), dim)
+        )
+        self.apply(self._init_weights)
+
+    @torch.no_grad()
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, q, k, v):
         B, C, H, W = q.shape
@@ -67,4 +84,4 @@ class SDP_Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         x = rearrange(x, 'b (h w) c -> b c h w', h=H)
-        return x
+        return x + self.ffn(x)
