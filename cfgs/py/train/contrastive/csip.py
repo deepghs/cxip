@@ -79,6 +79,7 @@ config = dict(
         {'model':'model', 'trainable':False},
     )),
 
+    exp_dir='exps/full_ds_csip_exp_0',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
@@ -114,7 +115,7 @@ config = dict(
     ),
 
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=256, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/data/csip',
@@ -126,7 +127,7 @@ config = dict(
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=256, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/data/csip_eval_v0',
