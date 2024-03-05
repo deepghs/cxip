@@ -15,6 +15,7 @@ from rainbowneko.train.data.bucket import PosNegBucket
 from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
 from rainbowneko.train.loss import MLCEImageLoss, InfoNCELoss
 from rainbowneko.train.data import ImageLabelDataset
+from rainbowneko.train.loggers import CLILogger, TBLogger
 from rainbowneko.ckpt_manager import CkptManagerPKL
 
 from model import CAFormerBackbone
@@ -78,6 +79,11 @@ config = dict(
         {'model':'model', 'trainable':False},
     )),
 
+    logger=[
+        partial(CLILogger, out_path='train.log', log_step=20),
+        partial(TBLogger, out_path='tb_log', log_step=10),
+    ],
+
     train=dict(
         train_epochs=100,
         workers=2,
@@ -108,10 +114,10 @@ config = dict(
     ),
 
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=256, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/train',
+                    img_root=r'/data/csip',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -120,10 +126,10 @@ config = dict(
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=256, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/eval',
+                    img_root=r'/data/csip_eval_v0',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
