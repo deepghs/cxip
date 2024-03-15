@@ -113,15 +113,34 @@ class CAFormerCrossBackbone(nn.Module):
             nn.Sigmoid()
         )
 
+    def attn_v1(self, anchor, pos, neg):
+        a_pos = self.cross_attn(anchor, pos, pos)
+        a_neg = self.cross_attn(anchor, neg, neg)
+        return a_pos, a_neg
+
+    def attn_v2(self, anchor, pos, neg):
+        a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
+        a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
+        a_pos = self.cross_attn(a_pos, a_pos, a_pos)
+        a_neg = self.cross_attn(a_neg, a_neg, a_neg)
+        return a_pos, a_neg
+    
+    def attn_v3(self, anchor, pos, neg):
+        ap = torch.cat([anchor, pos])
+        pa = torch.cat([pos, anchor])
+        an = torch.cat([anchor, neg])
+        na = torch.cat([neg, anchor])
+
+        a_pos = self.cross_attn(ap, pa, pa).view(2, -1, *ap.shape[1:]).mean(dim=0)
+        a_neg = self.cross_attn(an, na, na).view(2, -1, *an.shape[1:]).mean(dim=0)
+        return a_pos, a_neg
+
     def forward(self, x, x_ref=None):
         x = self.caformer.forward_features(x)
 
         if x_ref is None:
             anchor, pos, neg = x.chunk(3)
-
-            a_pos = self.cross_attn(anchor, pos, pos)
-            a_neg = self.cross_attn(anchor, neg, neg)
-
+            a_pos, a_neg = self.attn_v3(anchor, pos, neg)
             x = torch.cat([a_pos, a_neg])
         else:
             x = self.cross_attn(x, x_ref, x_ref)

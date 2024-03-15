@@ -64,8 +64,16 @@ config = dict(
     exp_dir='exps/csip_cat_s18',
     model_part=[
         dict(
+            lr=5e-5,
+            layers=['model.caformer'], 
+        ),
+        dict(
             lr=2e-4,
-            layers=[''],  # train all layers
+            layers=[
+                'model.cross_attn',
+                'model.attnpool',
+                'model.out_layers',
+            ], 
         )
     ],
 

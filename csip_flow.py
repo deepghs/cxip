@@ -6,10 +6,11 @@ from rainbowneko.models.wrapper import FeatWrapper
 from model import CAFormerCatBackbone
 from functools import partial
 from einops import repeat
+import math
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(384),
-    transforms.CenterCrop(384),
+    transforms.Resize(512),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
@@ -21,11 +22,18 @@ class CatImageAction(BasicAction):
         input['x_ref'] = repeat(input['x'], 'b c h w -> (n b) c h w', n=bs)
         input['x'] = repeat(input['x'], 'b c h w -> (b n) c h w', n=bs)
         return {'input': input}
+    
+class ReshapeAction(BasicAction):
+    @feedback_input
+    def forward(self, output, **states):
+        bs = int(math.sqrt(len(output['pred'])))
+        output['pred'] = output['pred'].view(bs, bs)
+        return {'output': output}
 
 actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
     BuildModelAction(partial(FeatWrapper, model=CAFormerCatBackbone('caformer_s18', input_resolution=224))),
-    LoadModelAction({'model': 'exps/csip_cat_s18/ckpts/csip-caformer-s18-3000.ckpt'}),
+    LoadModelAction({'model': 'exps/csip_cat_s18/ckpts/csip-caformer-s18-21000.ckpt'}),
 
     LoadImageAction(
         image_paths=[
@@ -40,6 +48,7 @@ actions=[
     ),
     CatImageAction(),
     ForwardAction(),
+    ReshapeAction(),
     VisPredAction(),
 ]
 
