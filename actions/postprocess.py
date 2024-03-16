@@ -179,11 +179,9 @@ class ClusterTestAction(BasicAction, MemoryMixin):
             'threshold': uniform(0.0, 0.5),
         }).run()
 
-        if not hasattr(memory, 'hpo'):
-            memory.hpo = []
-        memory.hpo.append({
+        memory.hpo = {
             'min_min_samples': self.min_samples_range[0],
             'max_min_samples': self.min_samples_range[1],
             'params': params,
             'scores': score,
-        })
+        }
