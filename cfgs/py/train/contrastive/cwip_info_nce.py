@@ -56,7 +56,7 @@ TRAIN_TRANSFORM = transforms.Compose([
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(384),
+    transforms.Resize(416),
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
@@ -79,14 +79,14 @@ config = dict(
         {'model':'model', 'trainable':False},
     )),
 
-    exp_dir='exps/cwip_info_nce_0',
+    exp_dir='exps/cwip_info_nce-416-50_0',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
     ],
 
     train=dict(
-        train_epochs=100,
+        train_epochs=200,
         workers=2,
         max_grad_norm=None,
         save_step=100,

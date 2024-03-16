@@ -51,7 +51,7 @@ TRAIN_TRANSFORM = transforms.Compose([
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(384),
+    transforms.Resize(512),
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
@@ -63,7 +63,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_v1_info_nce_m36-p384-weak',
+    exp_dir='exps/csip_v1_info_nce_m36-p384-100-weak',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
@@ -81,7 +81,7 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=30,
+        train_epochs=50,
         workers=4,
         max_grad_norm=None,
         save_step=100,
