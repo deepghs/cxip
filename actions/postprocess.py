@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 
 class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
-    def __init__(self, clses):
+    def __init__(self, clses, max_samples: int = 500000):
         MemoryMixin.__init__(self)
         if isinstance(clses, np.ndarray):
             clses = clses.tolist()
@@ -30,6 +30,8 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
                 id_map[v] = max_id
             cls_ids.append(id_map[v])
         self.cls_ids = np.array(cls_ids)
+
+        self.max_samples = max_samples
 
     @classmethod
     def _plt_export(self):
@@ -61,6 +63,12 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
 
         x = np.concatenate([pos_samples, neg_samples])
         y = np.concatenate([np.zeros_like(pos_samples), np.ones_like(neg_samples)])
+        if x.shape[0] >= self.max_samples:
+            logging.info(f'Sampling from {x.shape[0]} to {self.max_samples} ...')
+            idx = np.random.choice(np.arange(x.shape[0]), self.max_samples, replace=False)
+            x, y = x[idx], y[idx]
+        logging.info(f'X shape: {x.shape!r}, Y shape: {y.shape!r} ...')
+
         ths = np.linspace(0.0, 1.0, 1001)
         f1_scores, precision_scores, recall_scores = [], [], []
         for th in tqdm(ths, desc='Scan Thresholds'):
