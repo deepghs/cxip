@@ -8,12 +8,12 @@ import torch
 from ditk import logging
 from huggingface_hub import hf_hub_download
 from natsort import natsorted
-from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, BuildModelAction, \
+from rainbowneko.infer import WorkflowRunner, LoadImageAction, BuildModelAction, \
     PrepareAction, LoadModelAction, BasicAction, feedback_input, VisPredAction
 from rainbowneko.models.wrapper import FeatWrapper
 from torchvision import transforms
 
-from actions import ContrastiveAnalysisAction, ClusterTestAction
+from actions import ContrastiveAnalysisAction, ClusterTestAction, CXIPForwardAction
 from model import CAFormerBackbone
 
 logging.try_init_root(logging.INFO)
@@ -72,7 +72,7 @@ actions = [
         image_transforms=EVAL_TRANSFORM,
     ),
     # CatImageAction(),
-    ForwardAction(),
+    CXIPForwardAction(bs=32),
     # ReshapeAction(),
     VisPredAction(),
     ContrastiveAnalysisAction(image_cls),

@@ -1,12 +1,12 @@
-from torch import nn
 import torch
+from rainbowneko.models.layers import BatchCosineSimilarity
 from timm import create_model
 from timm.models import register_model
-from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, _create_metaformer
+from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, \
+    _create_metaformer
 from torch import nn
-from rainbowneko.models.layers import BatchCosineSimilarity
-from .attention import SDP_Attention
 
+from .attention import SDP_Attention
 from .attention_pool import AvgAttnPooling2d
 
 
@@ -20,6 +20,7 @@ def caformer_t15(pretrained=False, **kwargs) -> MetaFormer:
         **kwargs)
     return _create_metaformer('caformer_t15', pretrained=pretrained, **model_kwargs)
 
+
 class CAFormerBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
         super().__init__()
@@ -31,10 +32,18 @@ class CAFormerBackbone(nn.Module):
         self.attnpool = AvgAttnPooling2d(caformer.num_features)
         self.sim = BatchCosineSimilarity()
 
-    def forward(self, x):
+    def get_feat(self, x):
         x = self.caformer.forward_features(x)
         feat = self.attnpool(x)
-        out = self.sim(feat)  # [B,B]
+        return feat
+
+    def calc_sim(self, feat):
+        out = self.sim(feat)
+        return out
+
+    def forward(self, x):
+        feat = self.get_feat(x)
+        out = self.calc_sim(feat)  # [B,B]
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
 
 
@@ -42,7 +51,7 @@ class CAFormerStyleBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36'):
         super().__init__()
         caformer = create_model(model_name, pretrained=True)
-        #caformer.set_grad_checkpointing(True)
+        # caformer.set_grad_checkpointing(True)
         del caformer.head
         self.caformer = caformer
 
@@ -61,6 +70,7 @@ class CAFormerStyleBackbone(nn.Module):
         feat_all = self.feat_list.copy()
         self.feat_list.clear()
         return x, feat_all
+
 
 class CAFormerCatBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
@@ -83,8 +93,8 @@ class CAFormerCatBackbone(nn.Module):
         if x_ref is None:
             anchor, pos, neg = x.chunk(3)
 
-            a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
-            a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
+            a_pos = torch.cat([anchor, pos], dim=2)  # [B,C,2H,W]
+            a_neg = torch.cat([anchor, neg], dim=2)  # [B,C,2H,W]
             x = torch.cat([a_pos, a_neg])
         else:
             x = torch.cat([x, x_ref], dim=2)
@@ -93,6 +103,7 @@ class CAFormerCatBackbone(nn.Module):
         feat = self.attnpool(x)
         out = self.out_layers(feat).flatten()
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
+
 
 class CAFormerCrossBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
@@ -119,12 +130,12 @@ class CAFormerCrossBackbone(nn.Module):
         return a_pos, a_neg
 
     def attn_v2(self, anchor, pos, neg):
-        a_pos = torch.cat([anchor, pos], dim=2) # [B,C,2H,W]
-        a_neg = torch.cat([anchor, neg], dim=2) # [B,C,2H,W]
+        a_pos = torch.cat([anchor, pos], dim=2)  # [B,C,2H,W]
+        a_neg = torch.cat([anchor, neg], dim=2)  # [B,C,2H,W]
         a_pos = self.cross_attn(a_pos, a_pos, a_pos)
         a_neg = self.cross_attn(a_neg, a_neg, a_neg)
         return a_pos, a_neg
-    
+
     def attn_v3(self, anchor, pos, neg):
         ap = torch.cat([anchor, pos])
         pa = torch.cat([pos, anchor])
