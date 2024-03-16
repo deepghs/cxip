@@ -76,7 +76,7 @@ actions = [
     # ReshapeAction(),
     VisPredAction(),
     ContrastiveAnalysisAction(image_cls),
-    ClusterTestAction()
+    ClusterTestAction(min_samples_range=(3, 10))
 ]
 
 if __name__ == '__main__':
