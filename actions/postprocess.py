@@ -60,13 +60,18 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
                      f'mean: {pos_samples.mean():.3f}, std: {pos_samples.std():.3f}.')
         logging.info(f'Neg samples: {neg_samples.shape!r}, '
                      f'mean: {neg_samples.mean():.3f}, std: {neg_samples.std():.3f}.')
+        target_number = min(pos_samples.shape[0], neg_samples.shape[0], self.max_samples // 2)
+        if pos_samples.shape[0] > target_number:
+            logging.info(f'Sample positive samples from {pos_samples.shape[0]} to {target_number} ...')
+            idx = np.random.choice(np.arange(pos_samples.shape[0]), target_number, replace=False)
+            pos_samples = pos_samples[idx]
+        if neg_samples.shape[0] > target_number:
+            logging.info(f'Sample negative samples from {neg_samples.shape[0]} to {target_number} ...')
+            idx = np.random.choice(np.arange(neg_samples.shape[0]), target_number, replace=False)
+            neg_samples = neg_samples[idx]
 
         x = np.concatenate([pos_samples, neg_samples])
         y = np.concatenate([np.zeros_like(pos_samples), np.ones_like(neg_samples)])
-        if x.shape[0] >= self.max_samples:
-            logging.info(f'Sampling from {x.shape[0]} to {self.max_samples} ...')
-            idx = np.random.choice(np.arange(x.shape[0]), self.max_samples, replace=False)
-            x, y = x[idx], y[idx]
         logging.info(f'X shape: {x.shape!r}, Y shape: {y.shape!r} ...')
 
         ths = np.linspace(0.0, 1.0, 1001)
