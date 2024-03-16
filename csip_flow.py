@@ -3,14 +3,14 @@ from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, Vi
     PrepareAction, LoadModelAction, BasicAction, feedback_input
 from torchvision import transforms
 from rainbowneko.models.wrapper import FeatWrapper
-from model import CAFormerCatBackbone
+from model import CAFormerBackbone
 from functools import partial
 from einops import repeat
 import math
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
-    transforms.CenterCrop(224),
+    transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
@@ -32,8 +32,8 @@ class ReshapeAction(BasicAction):
 
 actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
-    BuildModelAction(partial(FeatWrapper, model=CAFormerCatBackbone('caformer_s18', input_resolution=224))),
-    LoadModelAction({'model': 'exps/csip_cat_s18/ckpts/csip-caformer-s18-21000.ckpt'}),
+    BuildModelAction(partial(FeatWrapper, model=CAFormerBackbone('caformer_m36'))),
+    LoadModelAction({'model': 'exps/csip_v1_info_nce_m36-p384-weak/ckpts/csip-caformer-m36-12000.ckpt'}),
 
     LoadImageAction(
         image_paths=[
@@ -46,9 +46,9 @@ actions=[
         ],
         image_transforms=EVAL_TRANSFORM,
     ),
-    CatImageAction(),
+    #CatImageAction(),
     ForwardAction(),
-    ReshapeAction(),
+    #ReshapeAction(),
     VisPredAction(),
 ]
 
