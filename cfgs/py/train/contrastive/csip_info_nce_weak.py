@@ -16,7 +16,7 @@ from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
 from rainbowneko.train.loss import MLCEImageLoss, InfoNCELoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
-
+from rainbowneko.train.loggers import CLILogger, TBLogger
 from model import CAFormerBackbone
 from evaluate import CSIPmAPContainer
 
@@ -64,6 +64,11 @@ config = dict(
     ],
 
     exp_dir='exps/csip_v1_info_nce_m36-p384-weak',
+    logger=[
+        partial(CLILogger, out_path='train.log', log_step=20),
+        partial(TBLogger, out_path='tb_log', log_step=10),
+    ],
+
     model_part=[
         dict(
             lr=1e-4,
@@ -79,7 +84,7 @@ config = dict(
         train_epochs=30,
         workers=4,
         max_grad_norm=None,
-        save_step=2000,
+        save_step=100,
 
         loss=partial(InfoNCELoss),
 
@@ -108,7 +113,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
+                    img_root=r'/data/csip_v1',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -120,7 +125,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
+                    img_root=r'/data/csip_eval_v0',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),

@@ -17,7 +17,7 @@ from rainbowneko.train.loss import MLCEImageLoss, InfoNCELoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.train.loggers import CLILogger, TBLogger
 from rainbowneko.ckpt_manager import CkptManagerPKL
-
+from rainbowneko.train.loggers import CLILogger, TBLogger
 from model import CAFormerBackbone
 from evaluate import CSIPmAPContainer
 
@@ -118,7 +118,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_v1',
+                    img_root=r'/data/cwip',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -130,7 +130,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_eval_v0',
+                    img_root=r'/data/cwip_eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
