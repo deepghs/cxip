@@ -2,3 +2,5 @@ timm
 natsort
 di-toolkit>=0.2.1
 tensorboard
+lighttuner
+scipy<1.11

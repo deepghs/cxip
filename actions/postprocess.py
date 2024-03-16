@@ -1,11 +1,13 @@
 import logging
 import os
 from tempfile import TemporaryDirectory
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
+from lighttuner.hpo import hpo, R, randint, uniform
 from rainbowneko.infer import BasicAction, MemoryMixin, feedback_input
 from sklearn.cluster import OPTICS
 from sklearn.metrics import f1_score, precision_score, recall_score, adjusted_rand_score
@@ -115,6 +117,11 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
             'scale': scale,
             'scores': scores,
             'threshold': best_threshold,
+            'metrics': {
+                'f1': f1_scores[iths],
+                'precision': precision_scores[iths],
+                'recall': recall_scores[iths],
+            },
             'plots': {
                 'f1_score': f1_score_plot,
                 'precision': precision_plot,
@@ -125,12 +132,14 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
 
 
 class ClusterTestAction(BasicAction, MemoryMixin):
-    def __init__(self, min_samples: int = 3):
+    def __init__(self, init_steps: int = 50, max_steps: int = 350, min_samples_range: Tuple[int, int] = (3, 5)):
         MemoryMixin.__init__(self)
-        self.min_samples: int = min_samples
+        self.init_steps = init_steps
+        self.max_steps = max_steps
+        self.min_samples_range = min_samples_range
 
-    @feedback_input
-    def forward(self, memory, **states):
+    def cluster_it(self, memory, threshold: float, min_samples: int):
+        logging.info(f'Clustering for threshold: {threshold}, min_samples: {min_samples} ...')
         post_info = memory.post_info
         batch_diff = post_info['scores']
 
@@ -138,12 +147,9 @@ class ClusterTestAction(BasicAction, MemoryMixin):
             return batch_diff[int(x), int(y)].item()
 
         samples = np.arange(post_info['true'].shape[0]).reshape(-1, 1)
-        clustering = OPTICS(max_eps=post_info['threshold'], min_samples=self.min_samples, metric=_metric).fit(samples)
+        clustering = OPTICS(max_eps=threshold, min_samples=min_samples, metric=_metric).fit(samples)
 
         cluster_labels = clustering.labels_.tolist()
-        logging.info(f'Clustered: {cluster_labels!r}.')
-        logging.info(f'True labels: {post_info["true"].tolist()!r}')
-
         processed_cluster_labels = cluster_labels.copy()
         max_clu_id = np.max(cluster_labels).item()
         for i in range(len(cluster_labels)):
@@ -152,3 +158,32 @@ class ClusterTestAction(BasicAction, MemoryMixin):
                 processed_cluster_labels[i] = max_clu_id
         cluster_score = adjusted_rand_score(post_info['true'], processed_cluster_labels)
         logging.info(f'Adjust rand score: {cluster_score:.4f}.')
+
+        return cluster_score
+
+    @feedback_input
+    def forward(self, memory, **states):
+        @hpo
+        def opt_func(cfg):
+            threshold: float = cfg['threshold']
+            min_samples: int = cfg['min_samples']
+            return self.cluster_it(memory, threshold, min_samples)
+
+        logging.info('Waiting for HPO ...')
+        params, score, _ = opt_func.bayes() \
+            .init_steps(self.init_steps) \
+            .max_steps(self.max_steps) \
+            .maximize(R).max_workers(1).rank(10) \
+            .spaces({
+            'min_samples': randint(*self.min_samples_range),
+            'threshold': uniform(0.0, 0.5),
+        }).run()
+
+        if not hasattr(memory, 'hpo'):
+            memory.hpo = []
+        memory.hpo.append({
+            'min_min_samples': self.min_samples_range[0],
+            'max_min_samples': self.min_samples_range[1],
+            'params': params,
+            'scores': score,
+        })
