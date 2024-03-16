@@ -34,7 +34,7 @@ class ReshapeAction(BasicAction):
         return {'output': output}
 
 
-eval_dataset_dir = '/data/eval_dataset_v0'
+eval_dataset_dir = '/data/csip_eval_v0'
 image_files = natsorted(glob.glob(os.path.join(eval_dataset_dir, '*', '*.jpg')))
 # image_files = [
 #     'test_cls/1/1cf603fd8dc873023793ac9d93912a45.jpg',
@@ -76,7 +76,7 @@ actions = [
     # ReshapeAction(),
     VisPredAction(),
     ContrastiveAnalysisAction(image_cls),
-    ClusterTestAction(min_samples=3)
+    ClusterTestAction(min_samples=5)
 ]
 
 if __name__ == '__main__':
