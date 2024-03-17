@@ -100,6 +100,7 @@ if __name__ == '__main__':
     same_data = []
     for name in tqdm(os.listdir(eval_dataset_dir)):
         pt_file_1 = os.path.join(pt_dir, f'{name}.pt'),
+        print(pt_file_1, os.path.exists(pt_file_1))
         mean_diff = runner.compare_feats(pt_file_1, pt_file_1)
         same_data.append({
             'artist_id_1': name,
