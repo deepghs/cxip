@@ -86,7 +86,9 @@ if __name__ == '__main__':
         mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
         diff_data.append({
             'name1': name1,
+            'count1': len(os.listdir(os.path.join(eval_dataset_dir, name1))),
             'name2': name2,
+            'count2': len(os.listdir(os.path.join(eval_dataset_dir, name2))),
             'diff': mean_diff.detach().numpy().item(),
         })
 
