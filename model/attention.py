@@ -44,12 +44,12 @@ class SDP_Attention(nn.Module):
         self.proj = nn.Linear(self.attention_dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, int(dim * ffn_expand)),
-            nn.GELU(),
-            nn.LayerNorm(int(dim * ffn_expand)),
-            nn.Linear(int(dim * ffn_expand), dim)
-        )
+        # self.ffn = nn.Sequential(
+        #     nn.Linear(dim, int(dim * ffn_expand)),
+        #     nn.GELU(),
+        #     nn.LayerNorm(int(dim * ffn_expand)),
+        #     nn.Linear(int(dim * ffn_expand), dim)
+        # )
         self.apply(self._init_weights)
 
     @torch.no_grad()
@@ -82,6 +82,6 @@ class SDP_Attention(nn.Module):
 
         x = rearrange(x, 'b nh n h -> b n (nh h)')
         x = self.proj(x)
-        x = self.proj_drop(x) + self.ffn(x)
+        #x = self.proj_drop(x) + self.ffn(x)
         x = rearrange(x, 'b (h w) c -> b c h w', h=H)
         return x

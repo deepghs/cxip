@@ -140,7 +140,7 @@ class CAFormerCrossBackbone(nn.Module):
 
         if x_ref is None:
             anchor, pos, neg = x.chunk(3)
-            a_pos, a_neg = self.attn_v3(anchor, pos, neg)
+            a_pos, a_neg = self.attn_v1(anchor, pos, neg)
             x = torch.cat([a_pos, a_neg])
         else:
             x = self.cross_attn(x, x_ref, x_ref)
