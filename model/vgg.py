@@ -14,12 +14,18 @@ class VGGStyleBackbone(nn.Module):
     def __init__(self):
         super().__init__()
         vgg = vgg19(weights=VGG19_Weights.DEFAULT).features.eval()
+        # self.vgg_blocks = nn.ModuleList([
+        #     nn.Sequential(vgg[:1]),
+        #     nn.Sequential(vgg[1:3]),
+        #     nn.Sequential(vgg[3:6]),
+        #     nn.Sequential(vgg[6:8]),
+        #     nn.Sequential(vgg[8:11]),
+        # ])
         self.vgg_blocks = nn.ModuleList([
-            nn.Sequential(vgg[:1]),
-            nn.Sequential(vgg[1:3]),
-            nn.Sequential(vgg[3:6]),
-            nn.Sequential(vgg[6:8]),
-            nn.Sequential(vgg[8:11]),
+            nn.Sequential(vgg[:6]),
+            nn.Sequential(vgg[6:11]),
+            nn.Sequential(vgg[11:15]),
+            nn.Sequential(vgg[15:20]),
         ])
 
     def forward(self, x):
