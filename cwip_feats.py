@@ -80,8 +80,8 @@ if __name__ == '__main__':
     pt_files = np.array(natsorted(glob.glob(os.path.join(pt_dir, '*.pt'))))
     diff_data = []
     for name1, name2 in tqdm(list(progressive_for(os.listdir(eval_dataset_dir), n=2))):
-        pt_file_1 = os.path.join(pt_dir, name1)
-        pt_file_2 = os.path.join(pt_dir, name2)
+        pt_file_1 = os.path.join(pt_dir, f'{name1}.pt')
+        pt_file_2 = os.path.join(pt_dir, f'{name2}.pt')
 
         mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
         diff_data.append({
