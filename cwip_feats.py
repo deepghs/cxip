@@ -110,7 +110,8 @@ if __name__ == '__main__':
 
     df_same = pd.DataFrame(same_data)
     print(df_same)
-    # print(df_same[df_same['diff'] >= 0.25])
+    print(df_same['diff'].describe())
+    print(df_same[df_same['diff'] >= 0.25])
     df_same.to_csv('test_data_same_cwip.csv', index=False)
 
     # runner.extract_images_save_feat('test_cls/4', 'test_feat_x2.pt')
