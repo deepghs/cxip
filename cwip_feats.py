@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 from ditk import logging
+from hbutils.reflection import progressive_for
 from huggingface_hub import hf_hub_download
 from natsort import natsorted
 from rainbowneko.infer import WorkflowRunner, LoadImageAction, BuildModelAction, \
@@ -77,25 +78,25 @@ if __name__ == '__main__':
 
     pt_dir = 'test_pts_cwip'
     pt_files = np.array(natsorted(glob.glob(os.path.join(pt_dir, '*.pt'))))
-    # diff_data = []
-    # for name1, name2 in tqdm(list(progressive_for(os.listdir(eval_dataset_dir), n=2))):
-    #     pt_file_1 = os.path.join(pt_dir, f'{name1}.pt')
-    #     pt_file_2 = os.path.join(pt_dir, f'{name2}.pt')
-    #
-    #     mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
-    #     diff_data.append({
-    #         'name1': name1,
-    #         'count1': len(os.listdir(os.path.join(eval_dataset_dir, name1))),
-    #         'name2': name2,
-    #         'count2': len(os.listdir(os.path.join(eval_dataset_dir, name2))),
-    #         'diff': mean_diff.detach().numpy().item(),
-    #     })
-    #
-    # df_diff = pd.DataFrame(diff_data)
-    # print(df_diff)
-    # print(df_diff['diff'].describe())
-    # print(df_diff[df_diff['diff'] < 0.30])
-    # df_diff.to_csv('test_data_diff_cwip.csv', index=False)
+    diff_data = []
+    for name1, name2 in tqdm(list(progressive_for(os.listdir(eval_dataset_dir), n=2))):
+        pt_file_1 = os.path.join(pt_dir, f'{name1}.pt')
+        pt_file_2 = os.path.join(pt_dir, f'{name2}.pt')
+
+        mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
+        diff_data.append({
+            'name1': name1,
+            'count1': len(os.listdir(os.path.join(eval_dataset_dir, name1))),
+            'name2': name2,
+            'count2': len(os.listdir(os.path.join(eval_dataset_dir, name2))),
+            'diff': mean_diff.detach().numpy().item(),
+        })
+
+    df_diff = pd.DataFrame(diff_data)
+    print(df_diff)
+    print(df_diff['diff'].describe())
+    print(df_diff[df_diff['diff'] < 0.30])
+    df_diff.to_csv('test_data_diff_cwip.csv', index=False)
 
     same_data = []
     for name in tqdm(os.listdir(eval_dataset_dir)):

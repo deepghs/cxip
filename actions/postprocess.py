@@ -131,6 +131,34 @@ class ContrastiveAnalysisAction(BasicAction, MemoryMixin):
         }
 
 
+class ClusterAction(BasicAction, MemoryMixin):
+    def __init__(self, min_samples: int = 3, max_eps: float = 0.5):
+        MemoryMixin.__init__(self)
+        self.min_samples = min_samples
+        self.max_eps = max_eps
+
+    @feedback_input
+    def forward(self, logits: np.ndarray, memory, **states):
+        scale = logits[0, 0]
+        logging.info(f'Model scale: {scale:.4f}')
+
+        np.set_printoptions(precision=3)
+        scores = np.clip((scale - logits) / (scale * 2), a_min=0.0, a_max=1.0)
+        logging.info(f'Clustering for max_eps: {self.max_eps}, min_samples: {self.min_samples} ...')
+        print(scores)
+
+        def _metric(x, y):
+            return scores[int(x), int(y)].item()
+
+        samples = np.arange(logits.shape[0]).reshape(-1, 1)
+        clustering = OPTICS(max_eps=self.max_eps, min_samples=self.min_samples, metric=_metric).fit(samples)
+
+        cluster_labels = clustering.labels_.tolist()
+        logging.info(f'Cluster result: {cluster_labels!r}')
+
+        return {'labels': cluster_labels}
+
+
 class ClusterTestAction(BasicAction, MemoryMixin):
     def __init__(self, init_steps: int = 50, max_steps: int = 350, min_samples_range: Tuple[int, int] = (3, 5)):
         MemoryMixin.__init__(self)
