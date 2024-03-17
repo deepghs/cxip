@@ -70,31 +70,32 @@ if __name__ == '__main__':
     pt_dir = 'test_pts_cwip'
     os.makedirs(pt_dir, exist_ok=True)
     for d in tqdm(os.listdir(eval_dataset_dir)):
-        runner.extract_images_save_feat(
-            os.path.join(eval_dataset_dir, d),
-            os.path.join(pt_dir, f'{d}.pt'),
-        )
+        if not os.path.exists(os.path.join(pt_dir, f'{d}.pt')):
+            runner.extract_images_save_feat(
+                os.path.join(eval_dataset_dir, d),
+                os.path.join(pt_dir, f'{d}.pt'),
+            )
 
     pt_dir = 'test_pts_cwip'
     pt_files = np.array(natsorted(glob.glob(os.path.join(pt_dir, '*.pt'))))
-    diff_data = []
-    for if1, if2 in tqdm(list(progressive_for(range(pt_files.shape[0]), n=2))):
-        pt_file_1 = pt_files[if1]
-        pt_file_2 = pt_files[if2]
-
-        mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
-        diff_data.append({
-            'artist_id_1': os.path.basename(pt_file_1).split('.')[0],
-            'pt_file_1': pt_file_1,
-            'artist_id_2': os.path.basename(pt_file_2).split('.')[0],
-            'pt_file_2': pt_file_2,
-            'diff': mean_diff.detach().numpy().item(),
-        })
-
-    df_diff = pd.DataFrame(diff_data)
-    print(df_diff)
-    print(df_diff[df_diff['diff'] < 0.30])
-    df_diff.to_csv('test_data_diff_cwip.csv', index=False)
+    # diff_data = []
+    # for if1, if2 in tqdm(list(progressive_for(range(pt_files.shape[0]), n=2))):
+    #     pt_file_1 = pt_files[if1]
+    #     pt_file_2 = pt_files[if2]
+    #
+    #     mean_diff = runner.compare_feats(pt_file_1, pt_file_2)
+    #     diff_data.append({
+    #         'artist_id_1': os.path.basename(pt_file_1).split('.')[0],
+    #         'pt_file_1': pt_file_1,
+    #         'artist_id_2': os.path.basename(pt_file_2).split('.')[0],
+    #         'pt_file_2': pt_file_2,
+    #         'diff': mean_diff.detach().numpy().item(),
+    #     })
+    #
+    # df_diff = pd.DataFrame(diff_data)
+    # print(df_diff)
+    # print(df_diff[df_diff['diff'] < 0.30])
+    # df_diff.to_csv('test_data_diff_cwip.csv', index=False)
 
     same_data = []
     for if1 in tqdm(range(pt_files.shape[0])):
