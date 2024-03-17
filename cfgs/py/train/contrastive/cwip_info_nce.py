@@ -79,7 +79,7 @@ config = dict(
         {'model': 'model', 'trainable': False},
     )),
 
-    exp_dir='exps/cwip_info_nce-416-50_v0.1',
+    exp_dir='exps/cwip_info_nce-416-50_v0.1_raw',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
@@ -118,7 +118,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
                          source=dict(
                              data_source1=ImageFolderClassSource(
-                                 img_root=r'/data/cwip',
+                                 img_root=r'/data/cwip_v0.1',
                                  image_transforms=TRAIN_TRANSFORM,
                              ),
                          ),
@@ -130,7 +130,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
                          source=dict(
                              data_source1=ImageFolderClassSource(
-                                 img_root=r'/data/cwip_eval',
+                                 img_root=r'/data/cwip_v0.1_eval',
                                  image_transforms=EVAL_TRANSFORM,
                              ),
                          ),
