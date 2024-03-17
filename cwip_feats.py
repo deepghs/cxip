@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import torch
 from ditk import logging
-from hbutils.reflection import progressive_for
 from huggingface_hub import hf_hub_download
 from natsort import natsorted
 from rainbowneko.infer import WorkflowRunner, LoadImageAction, BuildModelAction, \
@@ -94,6 +93,7 @@ if __name__ == '__main__':
     #
     # df_diff = pd.DataFrame(diff_data)
     # print(df_diff)
+    # print(df_diff['diff'].describe())
     # print(df_diff[df_diff['diff'] < 0.30])
     # df_diff.to_csv('test_data_diff_cwip.csv', index=False)
 
@@ -110,8 +110,11 @@ if __name__ == '__main__':
 
     df_same = pd.DataFrame(same_data)
     print(df_same)
-    print(df_same['diff'].describe())
-    print(df_same[df_same['diff'] >= 0.25])
+    print(df_same.describe())
+
+    filtered_df_name = df_same[(df_same['diff'] >= 0.25) | df_same['diff'].isna()]
+    print(filtered_df_name)
+    print(filtered_df_name.describe())
     df_same.to_csv('test_data_same_cwip.csv', index=False)
 
     # runner.extract_images_save_feat('test_cls/4', 'test_feat_x2.pt')
