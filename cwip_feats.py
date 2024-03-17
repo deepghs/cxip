@@ -102,8 +102,7 @@ if __name__ == '__main__':
         pt_file_1 = os.path.join(pt_dir, f'{name}.pt')
         mean_diff = runner.compare_feats(pt_file_1, pt_file_1)
         same_data.append({
-            'artist_id_1': name,
-            'pt_file_1': pt_file_1,
+            'name': name,
             'count': len(os.listdir(os.path.join(eval_dataset_dir, name))),
             'diff': mean_diff.detach().numpy().item(),
         })
