@@ -66,7 +66,7 @@ class CHMRunner:
 if __name__ == '__main__':
     runner = CHMRunner(base_actions)
 
-    eval_dataset_dir = '/data/cwip'
+    eval_dataset_dir = '/data/cwip_eval'
     pt_dir = 'test_pts_cwip'
     os.makedirs(pt_dir, exist_ok=True)
     for d in tqdm(os.listdir(eval_dataset_dir)):
