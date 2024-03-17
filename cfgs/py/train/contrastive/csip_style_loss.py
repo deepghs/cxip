@@ -43,14 +43,14 @@ TRAIN_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
-    transforms.RandomCrop(384),
+    transforms.RandomCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(512),
-    transforms.CenterCrop(384),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
@@ -61,10 +61,10 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_vgg19_styleloss',
+    exp_dir='exps/csip_vgg19_styleloss-2',
     model_part=[
         dict(
-            lr=2e-4,
+            lr=1e-4,
             layers=[''],  # train all layers
         )
     ],
@@ -109,26 +109,26 @@ config = dict(
 
     # batch_size要是3的倍数
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=36, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=384),
+            bucket=TripletBucket(target_size=224),
         )
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=36, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
                     img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=384),
+            bucket=TripletBucket(target_size=224),
         )
     ),
 )

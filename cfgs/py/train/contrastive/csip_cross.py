@@ -61,14 +61,14 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_cat_s18',
+    exp_dir='exps/csip_cross_m36',
     model_part=[
         dict(
-            lr=5e-5,
+            lr=1e-4,
             layers=['model.caformer'], 
         ),
         dict(
-            lr=2e-4,
+            lr=1e-4,
             layers=[
                 'model.cross_attn',
                 'model.attnpool',
@@ -82,8 +82,8 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=20,
-        workers=2,
+        train_epochs=30,
+        workers=4,
         max_grad_norm=None,
         save_step=1000,
 
@@ -105,11 +105,11 @@ config = dict(
     ],
 
     model=dict(
-        name='csip-caformer-s18',
-        wrapper=partial(FeatWrapper, model=CAFormerCrossBackbone('caformer_s18'))
+        name='csip-caformer-m36',
+        wrapper=partial(FeatWrapper, model=CAFormerCrossBackbone('caformer_m36'))
     ),
 
-    evaluator=partial(EvaluatorGroup, interval=200,
+    evaluator=partial(EvaluatorGroup, interval=100,
         evaluator_dict=dict(
             AP=CSIP_PN_APContainer(AveragePrecision(task="binary")),
         )
@@ -117,26 +117,26 @@ config = dict(
 
     # batch_size要是3的倍数
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/train',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=224),
+            bucket=TripletBucket(target_size=384),
         )
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/eval',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
-            bucket=TripletBucket(target_size=224),
+            bucket=TripletBucket(target_size=384),
         )
     ),
 )
