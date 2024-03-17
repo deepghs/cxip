@@ -98,13 +98,13 @@ if __name__ == '__main__':
     # df_diff.to_csv('test_data_diff_cwip.csv', index=False)
 
     same_data = []
-    for if1 in tqdm(range(pt_files.shape[0])):
-        pt_file_1 = pt_files[if1]
+    for name in tqdm(os.listdir(eval_dataset_dir)):
+        pt_file_1 = os.path.join(pt_dir, f'{name}.pt'),
         mean_diff = runner.compare_feats(pt_file_1, pt_file_1)
         same_data.append({
-            'artist_id_1': os.path.basename(pt_file_1).split('.')[0],
+            'artist_id_1': name,
             'pt_file_1': pt_file_1,
-            'count': len(os.listdir(os.path.join(eval_dataset_dir, os.path.basename(pt_file_1).split('.')[0]))),
+            'count': len(os.listdir(os.path.join(eval_dataset_dir, name))),
             'diff': mean_diff.detach().numpy().item(),
         })
 
