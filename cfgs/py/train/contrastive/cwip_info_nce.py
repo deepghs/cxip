@@ -1,4 +1,3 @@
-import random
 from functools import partial
 from typing import Tuple, Dict
 
@@ -47,35 +46,7 @@ class WeakRandAugment2(transforms.RandAugment):
         }
 
 
-class HeadCutAugment:
-    def __init__(self, p: float = 0.6):
-        self.p = p
-
-    def __call__(self, image):
-        r = random.random()
-        if r < self.p / 2:
-            from waifuc.action import HeadCutOutAction
-            from waifuc.model import ImageItem
-            try:
-                item = next(HeadCutOutAction().iter(ImageItem(image)))
-            except StopIteration:
-                return image
-            else:
-                return item.image
-
-        elif r < self.p:
-            from waifuc.action import HeadCoverAction
-            from waifuc.model import ImageItem
-            random_color = "#{:06x}".format(random.randint(0, 0xFFFFFF))
-            action = HeadCoverAction(scale=0.65 + random.random() * (1.4 - 0.65), color=random_color)
-            return action.process(ImageItem(image)).image
-
-        else:
-            return image
-
-
 TRAIN_TRANSFORM = transforms.Compose([
-    HeadCutAugment(p=0.6),
     transforms.Resize(416),
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
