@@ -77,4 +77,6 @@ class SimilarCompareAction(BasicAction, MemoryMixin):
             scores = torch.clip((scale - logits) / (scale * 2), 0.0, 1.0).detach().cpu()
             cropped = scores[:n_f1, n_f1:]
             logging.info(f'Mean: {cropped.mean():.3f}, Std: {cropped.std():.3f}')
-            # return cropped.mean()
+            return {
+                'mean': cropped.mean(),
+            }
