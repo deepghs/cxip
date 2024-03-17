@@ -1,2 +1,2 @@
-from .infer import CXIPForwardAction
+from .infer import CXIPForwardAction, SaveFeatureAction, SimilarCompareAction
 from .postprocess import ContrastiveAnalysisAction, ClusterTestAction
