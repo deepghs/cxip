@@ -18,7 +18,7 @@ from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
 from rainbowneko.train.loggers import CLILogger, TBLogger
 
-from model import CAFormerStyleBackbone
+from model import VGGStyleBackbone
 from evaluate import CSIPTripletAPContainer
 
 class WeakRandAugment2(transforms.RandAugment):
@@ -61,7 +61,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_test_tiny_lr2e-4_e500_bs24_styleloss',
+    exp_dir='exps/csip_vgg19_styleloss',
     model_part=[
         dict(
             lr=2e-4,
@@ -74,8 +74,8 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=500,
-        workers=2,
+        train_epochs=30,
+        workers=4,
         max_grad_norm=None,
         save_step=2000,
 
@@ -97,11 +97,11 @@ config = dict(
     ],
 
     model=dict(
-        name='csip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerStyleBackbone('caformer_m36'))
+        name='csip-vgg-19-conv5',
+        wrapper=partial(FeatWrapper, model=VGGStyleBackbone())
     ),
 
-    evaluator=partial(EvaluatorGroup, interval=200,
+    evaluator=partial(EvaluatorGroup, interval=100,
         evaluator_dict=dict(
             AP=CSIPTripletAPContainer(AveragePrecision(task="binary")),
         )
@@ -109,10 +109,10 @@ config = dict(
 
     # batch_size要是3的倍数
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=36, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/train',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -121,10 +121,10 @@ config = dict(
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=18, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=36, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip/eval',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
