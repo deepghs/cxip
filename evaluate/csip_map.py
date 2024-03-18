@@ -8,6 +8,7 @@ class CSIPmAPContainer(EvaluatorContainer):
         self.target_list = []
 
     def update(self, pred, target):
+        pred['pred'] = pred['pred'] - torch.diag_embed(torch.diag(pred['pred']))
         for pred_cudai, target_cudai in zip(pred['pred'], target['label']):
             same_mask = (target_cudai.unsqueeze(0) == target_cudai.unsqueeze(1)).long()
             pos = (pred_cudai*same_mask).max(dim=1).values
