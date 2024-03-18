@@ -2,3 +2,5 @@ timm
 natsort
 di-toolkit>=0.2.1
 tensorboard
+dghs-imgutils>=0.3.5
+git+https://github.com/deepghs/waifuc.git@main#egg=waifuc[video]

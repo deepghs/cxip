@@ -74,7 +74,7 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=30,
+        train_epochs=50,
         workers=4,
         max_grad_norm=None,
         save_step=2000,
@@ -112,7 +112,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
+                    img_root=r'/data/csip_v1',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -124,7 +124,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=60, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
+                    img_root=r'/data/csip_eval_v0',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
