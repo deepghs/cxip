@@ -104,7 +104,7 @@ config = dict(
     ),
 
     model=dict(
-        name='csip-caformer-m36',
+        name='cwip-caformer-m36',
         wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
     ),
 

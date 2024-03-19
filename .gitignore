@@ -1218,5 +1218,4 @@ fabric.properties
 *.pt
 /runs
 /YOLOv8
-/cfgs
 /exps

@@ -1,28 +1,29 @@
 from functools import partial
-
 from typing import Tuple, Dict
-import torch
-from torch import nn
-import torchvision
-from torchvision import transforms
-from torchvision.transforms import RandAugment
-from torch.nn import CrossEntropyLoss
-from torchmetrics.classification import MulticlassAccuracy, AveragePrecision
 
-from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
-from rainbowneko.models.wrapper import SingleWrapper, FeatWrapper
-from rainbowneko.train.data.bucket import PosNegBucket
-from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
-from rainbowneko.train.loss import MLCEImageLoss, NoisyInfoNCELoss
-from rainbowneko.train.data import ImageLabelDataset
+import torch
+import torchvision
 from rainbowneko.ckpt_manager import CkptManagerPKL
+from rainbowneko.evaluate import EvaluatorGroup
+from rainbowneko.models.wrapper import FeatWrapper
+from rainbowneko.train.data import ImageLabelDataset
+from rainbowneko.train.data.bucket import PosNegBucket
+from rainbowneko.train.data.source import ImageFolderClassSource
 from rainbowneko.train.loggers import CLILogger, TBLogger
-from model import CAFormerBackbone
+from rainbowneko.train.loss import InfoNCELoss, NoisyInfoNCELoss
+from torch import nn
+from torchmetrics.classification import AveragePrecision
+from torchvision import transforms
+
 from evaluate import CSIPmAPContainer
-from PIL import Image
-import random
+from model import CAFormerBackbone
 
 num_classes = 10
+
+def load_resnet():
+    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    return model
 
 class WeakRandAugment2(transforms.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
@@ -31,51 +32,28 @@ class WeakRandAugment2(transforms.RandAugment):
             "Identity":(torch.tensor(0.0), False),
             "ShearX":(torch.linspace(0.0, 0.2, num_bins), True),
             "ShearY":(torch.linspace(0.0, 0.2, num_bins), True),
-            #"TranslateX":(torch.linspace(0.0, 0.08*image_size[1], num_bins), True),
-            #"TranslateY":(torch.linspace(0.0, 0.08*image_size[0], num_bins), True),
+            "TranslateX":(torch.linspace(0.0, 0.08*image_size[1], num_bins), True),
+            "TranslateY":(torch.linspace(0.0, 0.08*image_size[0], num_bins), True),
             "Rotate":(torch.linspace(0.0, 30.0, num_bins), True),
+            "Brightness":(torch.linspace(0.0, 0.5, num_bins), True),
+            "Contrast":(torch.linspace(0.0, 0.05, num_bins), True),
+            "Sharpness":(torch.linspace(0.0, 0.5, num_bins), True),
+            "Posterize":(8-(torch.arange(num_bins)/((num_bins-1)/4)).round().int(), False),
+            "AutoContrast":(torch.tensor(0.0), False),
+            "Equalize":(torch.tensor(0.0), False),
         }
 
-class CropAndStitch:
-    def __init__(self, img_size=384, n=12):
-        assert img_size % n == 0
-        self.n = n
-        self.m = img_size // n
-
-    def __call__(self, image):
-        width, height = image.size
-
-        # 创建一个新的空白图像,用于拼接裁剪后的图像块
-        stitched_image = Image.new('RGB', (self.n * self.m, self.n * self.m))
-
-        # 随机裁剪图像块并拼接
-        for i in range(self.n):
-            for j in range(self.n):
-                # 随机生成裁剪位置的左上角坐标
-                left = random.randint(0, width - self.m)
-                top = random.randint(0, height - self.m)
-
-                # 裁剪图像块
-                patch = image.crop((left, top, left + self.m, top + self.m))
-
-                # 将裁剪后的图像块拼接到新图像上
-                stitched_image.paste(patch, (i * self.m, j * self.m))
-
-        return stitched_image
-
-
 TRAIN_TRANSFORM = transforms.Compose([
-    transforms.Resize(640),
+    transforms.Resize(512),
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
-    #transforms.RandomCrop(384),
-    CropAndStitch(384, 12),
+    transforms.RandomResizedCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(640),
+    transforms.Resize(384),
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
@@ -85,12 +63,6 @@ config = dict(
     _base_=[
         'cfgs/py/train/train_base.py',
         'cfgs/py/train/tuning_base.py',
-    ],
-
-    exp_dir='exps/csip_v1_noisy_info_nce_m36-p384-patch',
-    logger=[
-        partial(CLILogger, out_path='train.log', log_step=20),
-        partial(TBLogger, out_path='tb_log', log_step=10),
     ],
 
     model_part=[
@@ -104,11 +76,17 @@ config = dict(
         {'model':'model', 'trainable':False},
     )),
 
+    exp_dir='exps/full_ds_caip_v1_exp_info_nce',
+    logger=[
+        partial(CLILogger, out_path='train.log', log_step=20),
+        partial(TBLogger, out_path='tb_log', log_step=10),
+    ],
+
     train=dict(
         train_epochs=100,
-        workers=8,
+        workers=2,
         max_grad_norm=None,
-        save_step=1000,
+        save_step=100,
 
         loss=partial(NoisyInfoNCELoss, temperature=1/16.),
 
@@ -123,7 +101,7 @@ config = dict(
     ),
 
     model=dict(
-        name='csip-caformer-m36',
+        name='caip-caformer-m36',
         wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
     ),
 
