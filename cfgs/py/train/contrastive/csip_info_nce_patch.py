@@ -31,15 +31,9 @@ class WeakRandAugment2(transforms.RandAugment):
             "Identity":(torch.tensor(0.0), False),
             "ShearX":(torch.linspace(0.0, 0.2, num_bins), True),
             "ShearY":(torch.linspace(0.0, 0.2, num_bins), True),
-            "TranslateX":(torch.linspace(0.0, 0.08*image_size[1], num_bins), True),
-            "TranslateY":(torch.linspace(0.0, 0.08*image_size[0], num_bins), True),
+            #"TranslateX":(torch.linspace(0.0, 0.08*image_size[1], num_bins), True),
+            #"TranslateY":(torch.linspace(0.0, 0.08*image_size[0], num_bins), True),
             "Rotate":(torch.linspace(0.0, 30.0, num_bins), True),
-            "Brightness":(torch.linspace(0.0, 0.5, num_bins), True),
-            "Contrast":(torch.linspace(0.0, 0.05, num_bins), True),
-            "Sharpness":(torch.linspace(0.0, 0.5, num_bins), True),
-            "Posterize":(8-(torch.arange(num_bins)/((num_bins-1)/4)).round().int(), False),
-            "AutoContrast":(torch.tensor(0.0), False),
-            "Equalize":(torch.tensor(0.0), False),
         }
 
 class CropAndStitch:
@@ -71,8 +65,8 @@ class CropAndStitch:
 
 
 TRAIN_TRANSFORM = transforms.Compose([
-    transforms.Resize(512),
-    #WeakRandAugment2(),
+    transforms.Resize(640),
+    WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
     #transforms.RandomCrop(384),
     CropAndStitch(384, 12),
@@ -81,7 +75,7 @@ TRAIN_TRANSFORM = transforms.Compose([
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(512),
+    transforms.Resize(640),
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
@@ -155,7 +149,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),

@@ -118,7 +118,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_v1',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -130,7 +130,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_eval_v0',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),

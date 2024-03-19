@@ -13,7 +13,7 @@ from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
 from rainbowneko.models.wrapper import SingleWrapper, FeatWrapper
 from rainbowneko.train.data.bucket import PosNegBucket
 from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
-from rainbowneko.train.loss import MLCEImageLoss, InfoNCELoss
+from rainbowneko.train.loss import MLCEImageLoss, NoisyInfoNCELoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
 from rainbowneko.train.loggers import CLILogger, TBLogger
@@ -63,7 +63,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_v1_info_nce_m36-p384-100-weak',
+    exp_dir='exps/csip_v1_info_nce_s18-p384-100-weak-noisy',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
@@ -81,12 +81,12 @@ config = dict(
     )),
 
     train=dict(
-        train_epochs=50,
+        train_epochs=30,
         workers=4,
         max_grad_norm=None,
-        save_step=100,
+        save_step=1000,
 
-        loss=partial(InfoNCELoss),
+        loss=partial(NoisyInfoNCELoss, temperature=1/16.),
 
         optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
 
@@ -99,8 +99,8 @@ config = dict(
     ),
 
     model=dict(
-        name='csip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
+        name='csip-caformer-s18',
+        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_s18', input_resolution=384))
     ),
 
     evaluator=partial(EvaluatorGroup, interval=100,
@@ -113,7 +113,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_v1',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
@@ -125,7 +125,7 @@ config = dict(
         dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_eval_v0',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
