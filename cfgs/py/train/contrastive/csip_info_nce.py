@@ -18,7 +18,7 @@ from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.train.loggers import CLILogger, TBLogger
 from rainbowneko.ckpt_manager import CkptManagerPKL
 
-from model import CAFormerBackbone
+from model import CAFormerBackbone, SwinV2Backbone
 from evaluate import CSIPmAPContainer
 
 num_classes = 10
@@ -106,6 +106,7 @@ config = dict(
     model=dict(
         name='csip-caformer-m36',
         wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
+        #wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3'))
     ),
 
     evaluator=partial(EvaluatorGroup, interval=100,
