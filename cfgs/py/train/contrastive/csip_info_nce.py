@@ -53,6 +53,7 @@ TRAIN_TRANSFORM = transforms.Compose([
     transforms.RandomResizedCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
@@ -60,6 +61,7 @@ EVAL_TRANSFORM = transforms.Compose([
     transforms.CenterCrop(384),
     transforms.ToTensor(),
     transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 config = dict(
