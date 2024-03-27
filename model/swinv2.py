@@ -1,20 +1,16 @@
-from torch import nn
 import torch
-from timm import create_model
-from timm.models import register_model
-from timm.models.swin_transformer_v2 import swinv2_base_window8_256
 from rainbowneko.models.layers import BatchCosineSimilarity
+from timm import create_model
 from torch import nn
-from .attention import SDP_Attention
 
 from .attention_pool import AvgAttnPooling2d
-from torchvision.models import vgg19, VGG19_Weights
+from einops import rearrange
 
 
 class SwinV2Backbone(nn.Module):
-    def __init__(self, model_name='hf-hub:SmilingWolf/wd-swinv2-tagger-v3'):
+    def __init__(self, model_name='hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=448):
         super().__init__()
-        swin = create_model(model_name, pretrained=True)
+        swin = create_model(model_name, pretrained=True, img_size=img_size)
         swin.set_grad_checkpointing(True)
         del swin.head
         self.swin = swin
@@ -24,9 +20,11 @@ class SwinV2Backbone(nn.Module):
 
     def forward(self, x):
         x = self.swin.forward_features(x)
+        x = rearrange(x, 'b h w c -> b c (h w)')
         feat = self.attnpool(x)
         out = self.sim(feat)  # [B,B]
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
+
 
 if __name__ == '__main__':
     model = SwinV2Backbone()
