@@ -17,12 +17,12 @@ from rainbowneko.train.loss import MLCEImageLoss, NoisyInfoNCELoss
 from rainbowneko.train.data import ImageLabelDataset
 from rainbowneko.ckpt_manager import CkptManagerPKL
 from rainbowneko.train.loggers import CLILogger, TBLogger
-from model import CAFormerBackbone
+from model import CAFormerBackbone, SwinV2Backbone
 from evaluate import CSIPmAPContainer
 from PIL import Image
 import random
 
-num_classes = 10
+img_size = 448
 
 class WeakRandAugment2(transforms.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
@@ -69,16 +69,18 @@ TRAIN_TRANSFORM = transforms.Compose([
     WeakRandAugment2(),
     transforms.RandomHorizontalFlip(),
     #transforms.RandomCrop(384),
-    CropAndStitch(384, 12),
+    CropAndStitch(img_size, 14),
     transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    #transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(640),
-    transforms.CenterCrop(384),
+    transforms.CenterCrop(img_size),
     transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    #transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 config = dict(
@@ -87,7 +89,7 @@ config = dict(
         'cfgs/py/train/tuning_base.py',
     ],
 
-    exp_dir='exps/csip_v1_noisy_info_nce_m36-p384-patch',
+    exp_dir='exps/csip_v1_noisy_info_nce_swinv2-p448-patch',
     logger=[
         partial(CLILogger, out_path='train.log', log_step=20),
         partial(TBLogger, out_path='tb_log', log_step=10),
@@ -123,8 +125,9 @@ config = dict(
     ),
 
     model=dict(
-        name='csip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
+        name='csip-swinv2-base',
+        #wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
+        wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=img_size))
     ),
 
     evaluator=partial(EvaluatorGroup, interval=100,
@@ -134,26 +137,26 @@ config = dict(
     ),
 
     data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_v1',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
                     image_transforms=TRAIN_TRANSFORM,
                 ),
             ),
-            bucket=PosNegBucket(target_size=384, pos_rate=0.5),
+            bucket=PosNegBucket(target_size=img_size, pos_rate=0.5),
         )
     ),
 
     data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
+        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
             source=dict(
                 data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_eval_v0',
+                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
                     image_transforms=EVAL_TRANSFORM,
                 ),
             ),
-            bucket=PosNegBucket(target_size=384, pos_rate=0.5),
+            bucket=PosNegBucket(target_size=img_size, pos_rate=0.5),
         )
     ),
 )

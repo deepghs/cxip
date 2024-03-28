@@ -3,7 +3,7 @@ from rainbowneko.infer import WorkflowRunner, LoadImageAction, ForwardAction, Vi
     PrepareAction, LoadModelAction, BasicAction, feedback_input
 from torchvision import transforms
 from rainbowneko.models.wrapper import FeatWrapper
-from model import CAFormerBackbone
+from model import CAFormerBackbone, SwinV2Backbone
 from functools import partial
 from einops import repeat
 import math
@@ -39,10 +39,11 @@ class CropAndStitch:
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize(640),
-    transforms.CenterCrop(384),
-    CropAndStitch(384, 12),
+    transforms.CenterCrop(448),
+    #CropAndStitch(384, 12),
     transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    #transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 class CatImageAction(BasicAction):
@@ -64,8 +65,8 @@ actions=[
     PrepareAction(device='cuda', dtype=torch.float32),
     #BuildModelAction(partial(FeatWrapper, model=CAFormerBackbone('caformer_m36'))),
     #LoadModelAction({'model': 'exps/csip_v1_info_nce_m36-p384-weak/ckpts/csip-caformer-m36-12000.ckpt'}),
-    BuildModelAction(partial(FeatWrapper, model=CAFormerBackbone('caformer_s18'))),
-    LoadModelAction({'model': 'exps/csip_v1_noisy_info_nce_s18-p384-patch/ckpts/csip-caformer-s18-12000.ckpt'}),
+    BuildModelAction(partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3'))),
+    LoadModelAction({'model': 'exps/csip_v1_noisy_info_nce_swinv2-p448-patch/ckpts/csip-swinv2-base-22000.ckpt'}),
 
     LoadImageAction(
         image_paths=[
