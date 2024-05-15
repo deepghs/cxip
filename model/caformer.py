@@ -1,5 +1,6 @@
 from torch import nn
 import torch
+import numpy as np
 from timm import create_model
 from timm.models import register_model
 from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, _create_metaformer
@@ -9,6 +10,20 @@ from .attention import SDP_Attention
 
 from .attention_pool import AvgAttnPooling2d
 
+class BatchCosineSimilarityONNX(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+
+    def forward(self, image_features):  # x: BxN
+        # normalized features
+        image_features = image_features / image_features.norm(dim=1, keepdim=True)
+
+        # cosine similarity as logits
+        logit_scale = self.logit_scale.exp()
+        logits_per_image = logit_scale * torch.mm(image_features, image_features.transpose(0, 1))
+
+        return logits_per_image
 
 @register_model
 def caformer_t15(pretrained=False, **kwargs) -> MetaFormer:
@@ -29,7 +44,7 @@ class CAFormerBackbone(nn.Module):
         self.caformer = caformer
 
         self.attnpool = AvgAttnPooling2d(caformer.num_features)
-        self.sim = BatchCosineSimilarity()
+        self.sim = BatchCosineSimilarityONNX()
 
     def forward(self, x):
         x = self.caformer.forward_features(x)
