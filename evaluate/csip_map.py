@@ -1,14 +1,14 @@
-from rainbowneko.evaluate import EvaluatorContainer
+from rainbowneko.evaluate import MetricContainer
 from rainbowneko.models.layers import StyleSimilarity
 import torch
 
-class CSIPmAPContainer(EvaluatorContainer):
+class CXIPMetricContainer(MetricContainer):
     def reset(self):
         self.pred_list = []
         self.target_list = []
 
-    def update(self, pred, target):
-        for pred_cudai, target_cudai in zip(pred['pred'], target['label']):
+    def update(self, pred, label):
+        for pred_cudai, target_cudai in zip(pred, label):
             pred_cudai = pred_cudai - torch.diag_embed(torch.diag(pred_cudai))
             same_mask = (target_cudai.unsqueeze(0) == target_cudai.unsqueeze(1)).long()
             pos = (pred_cudai*same_mask).max(dim=1).values
@@ -18,12 +18,18 @@ class CSIPmAPContainer(EvaluatorContainer):
             self.target_list.append(torch.ones(len(target_cudai), device='cpu', dtype=torch.long))
             self.target_list.append(torch.zeros(len(target_cudai), device='cpu', dtype=torch.long))
 
-    def evaluate(self):
-        pred = torch.cat(self.pred_list) #[N,B]
-        target = torch.cat(self.target_list) #[N]
-        return self.evaluator(pred, target)
+    def finish(self, gather, is_local_main_process):
+        pred = torch.cat(self.pred_list)  # [N,B]
+        target = torch.cat(self.target_list)  # [N]
 
-class CSIPTripletAPContainer(EvaluatorContainer):
+        pred = gather(pred)
+        target = gather(target)
+
+        v_metric = self.metric(pred, target)
+
+        return v_metric.item()
+
+class CSIPTripletAPContainer(MetricContainer):
     def __init__(self, evaluator):
         super().__init__(evaluator)
         self.style_sim = StyleSimilarity(batch_mean=True)
@@ -51,7 +57,7 @@ class CSIPTripletAPContainer(EvaluatorContainer):
         target = torch.cat(self.target_list) #[N]
         return self.evaluator(pred, target)
 
-class CSIP_PN_APContainer(EvaluatorContainer):
+class CSIP_PN_APContainer(MetricContainer):
     def reset(self):
         self.pred_list = []
         self.target_list = []

@@ -1,18 +1,23 @@
 from functools import partial
 
 import torch
-from torch import nn
 import torchvision
+import torchvision.transforms as T
+from torch import nn
 from torch.nn import CrossEntropyLoss
 from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
-from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
+from cfgs.py.train import train_base, tuning_base
+from rainbowneko.ckpt_manager import ckpt_saver, NekoOptimizerSaver
+from rainbowneko.data import BaseDataset
+from rainbowneko.data import FixedBucket
+from rainbowneko.data.handler import HandlerChain, ImageHandler, LoadImageHandler
+from rainbowneko.data.source import IndexSource
+from rainbowneko.evaluate import MetricGroup, MetricContainer, Evaluator
 from rainbowneko.models.wrapper import SingleWrapper
-from rainbowneko.train.data import FixedBucket
-from rainbowneko.train.data.source import IndexSource
+from rainbowneko.parser import CfgWDModelParser, neko_cfg
 from rainbowneko.train.loss import LossContainer
-from rainbowneko.train.data import ImageLabelDataset
-from rainbowneko.ckpt_manager import CkptManagerPKL
+from rainbowneko.utils import CosineLR
 
 num_classes = 10
 
@@ -21,86 +26,102 @@ def load_resnet():
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
 
-config = dict(
-    _base_=[
-        'cfgs/py/train/train_base.py',
-        'cfgs/py/train/tuning_base.py',
-    ],
+@neko_cfg
+def make_cfg():
+    return dict(
+        _base_=[train_base, tuning_base],
 
-    model_part=[
-        dict(
-            lr=1e-2,
-            layers=[''],  # train all layers
-        )
-    ],
+        model_part=CfgWDModelParser([
+            dict(
+                lr=1e-4,
+                layers=[''],  # train all layers
+            )
+        ]),
 
-    ckpt_manager=partial(CkptManagerPKL, saved_model=(
-        {'model':'model', 'trainable':False},
-    )),
-
-    train=dict(
-        train_epochs=100,
-        workers=2,
-        max_grad_norm=None,
-        save_step=2000,
-
-        loss=partial(LossContainer, loss=CrossEntropyLoss()),
-
-        optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
-
-        scale_lr=False,
-        scheduler=dict(
-            name='cosine',
-            num_warmup_steps=10,
+        # func(_partial_=True, ...) same as partial(func, ...)
+        ckpt_saver=dict(
+            model=ckpt_saver(target_module='model'),
+            optimizer=NekoOptimizerSaver(),
         ),
-        metrics=partial(EvaluatorGroup, evaluator_dict=dict(
-            acc=ClsEvaluatorContainer(MulticlassAccuracy(num_classes=num_classes)),
-            f1=ClsEvaluatorContainer(MulticlassF1Score(num_classes=num_classes)),
-        )),
-    ),
 
-    model=dict(
-        name='cifar-resnet18',
-        wrapper=partial(SingleWrapper, model=load_resnet())
-    ),
+        train=dict(
+            train_epochs=10,
+            workers=2,
+            max_grad_norm=None,
+            save_step=2000,
 
-    evaluator=partial(EvaluatorGroup,
-        interval=500,
-        evaluator_dict=dict(
-            acc=ClsEvaluatorContainer(MulticlassAccuracy(num_classes=num_classes)),
-            f1=ClsEvaluatorContainer(MulticlassF1Score(num_classes=num_classes)),
-        )
-    ),
+            loss=LossContainer(loss=CrossEntropyLoss()),
 
-    data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
+            optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
+
+            scale_lr=False,
+            lr_scheduler=CosineLR(
+                _partial_=True,
+                warmup_steps=100,
+            ),
+            metrics=MetricGroup(
+                acc=MetricContainer(MulticlassAccuracy(num_classes=num_classes, average='micro')),
+                f1=MetricContainer(MulticlassF1Score(num_classes=num_classes, average='micro')),
+            ),
+        ),
+
+        model=dict(
+            name='cifar-resnet18',
+            wrapper=partial(SingleWrapper, model=load_resnet())
+        ),
+
+        data_train=cfg_data(), # config can be split into another function with @neko_cfg
+
+        evaluator=cfg_evaluator(),
+    )
+
+@neko_cfg
+def cfg_data():
+    return dict(
+        dataset1=partial(BaseDataset, batch_size=16, loss_weight=1.0,
             source=dict(
                 data_source1=IndexSource(
-                    data=torchvision.datasets.cifar.CIFAR10(root=r'E:\dataset\cifar', train=True, download=True),
-                    image_transforms=torchvision.transforms.Compose([
-                        torchvision.transforms.RandomCrop(size=32, padding=4),
-                        torchvision.transforms.RandomHorizontalFlip(),
-                        torchvision.transforms.ToTensor(),
-                        torchvision.transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
-                    ])
+                    data=torchvision.datasets.cifar.CIFAR10(root='/mnt/others/dataset/cifar', train=True, download=True)
                 ),
             ),
-            bucket=FixedBucket(target_size=32),
-        )
-    ),
-
-    data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
-            source=dict(
-                data_source1=IndexSource(
-                    data=torchvision.datasets.cifar.CIFAR10(root=r'E:\dataset\cifar', train=False, download=True),
-                    image_transforms=torchvision.transforms.Compose([
-                        torchvision.transforms.ToTensor(),
-                        torchvision.transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
-                    ])
-                ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                bucket=FixedBucket.handler, # bucket 会自带一些处理模块
+                image=ImageHandler(transform=T.Compose([
+                        T.RandomCrop(size=32, padding=4),
+                        T.RandomHorizontalFlip(),
+                        T.ToTensor(),
+                        T.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
+                    ]),
+                )
             ),
             bucket=FixedBucket(target_size=32),
         )
     )
-)
+
+@neko_cfg
+def cfg_evaluator():
+    return partial(Evaluator,
+        interval=50,
+        metric=MetricGroup(
+            acc=MetricContainer(MulticlassAccuracy(num_classes=num_classes, average='micro')),
+            f1=MetricContainer(MulticlassF1Score(num_classes=num_classes, average='micro')),
+        ),
+        dataset=partial(BaseDataset, batch_size=16, loss_weight=1.0,
+            source=dict(
+                data_source1=IndexSource(
+                    data=torchvision.datasets.cifar.CIFAR10(root='/mnt/others/dataset/cifar', train=False, download=True)
+                ),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                bucket=FixedBucket.handler,
+                image=ImageHandler(transform=T.Compose([
+                        T.ToTensor(),
+                        T.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
+                    ]),
+                )
+            ),
+            bucket=FixedBucket(target_size=32),
+        )
+    )

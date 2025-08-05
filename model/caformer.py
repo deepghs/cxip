@@ -1,4 +1,3 @@
-from torch import nn
 import torch
 import numpy as np
 from timm import create_model
@@ -8,9 +7,9 @@ from torch import nn
 from rainbowneko.models.layers import BatchCosineSimilarity
 from .attention import SDP_Attention
 
-from .attention_pool import AvgAttnPooling2d
+from .attention_pool import AttentionPool2d, AvgAttnPooling2d
 
-class BatchCosineSimilarityONNX(nn.Module):
+class BatchCosineSimilarity(nn.Module):
     def __init__(self):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
@@ -36,22 +35,22 @@ def caformer_t15(pretrained=False, **kwargs) -> MetaFormer:
     return _create_metaformer('caformer_t15', pretrained=pretrained, **model_kwargs)
 
 class CAFormerBackbone(nn.Module):
-    def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):
+    def __init__(self, model_name='caformer_m36', input_resolution: int = 384, heads: int = 8, out_dims: int = 768):
         super().__init__()
+        self.input_resolution = input_resolution
         caformer = create_model(model_name, pretrained=True)
         caformer.set_grad_checkpointing(True)
         del caformer.head
         self.caformer = caformer
 
-        self.attnpool = AvgAttnPooling2d(caformer.num_features)
-        self.sim = BatchCosineSimilarityONNX()
+        self.attnpool = AttentionPool2d(self.input_resolution//32, self.caformer.output_dim, heads, out_dims)
+        self.sim = BatchCosineSimilarity()
 
     def forward(self, x):
         x = self.caformer.forward_features(x)
         feat = self.attnpool(x)
         out = self.sim(feat)  # [B,B]
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
-
 
 class CAFormerStyleBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36'):

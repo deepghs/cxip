@@ -126,8 +126,8 @@ config = dict(
 
     model=dict(
         name='csip-swinv2-base',
-        #wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
-        wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=img_size))
+        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
+        #wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=img_size))
     ),
 
     evaluator=partial(EvaluatorGroup, interval=100,

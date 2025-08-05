@@ -1,1 +1,1 @@
-from .csip_map import CSIPmAPContainer, CSIPTripletAPContainer, CSIP_PN_APContainer
+from .csip_map import CXIPMetricContainer, CSIPTripletAPContainer, CSIP_PN_APContainer
