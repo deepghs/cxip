@@ -2,6 +2,8 @@
 ### Example user template template
 ### Example user template
 
+exps*/
+
 # IntelliJ project files
 .idea
 *.iml

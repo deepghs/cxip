@@ -41,9 +41,9 @@ class CAFormerBackbone(nn.Module):
         caformer = create_model(model_name, pretrained=True)
         caformer.set_grad_checkpointing(True)
         del caformer.head
-        self.caformer = caformer
+        self.caformer: MetaFormer = caformer
 
-        self.attnpool = AttentionPool2d(self.input_resolution//32, self.caformer.output_dim, heads, out_dims)
+        self.attnpool = AttentionPool2d(self.input_resolution//32, self.caformer.num_features, heads, out_dims)
         self.sim = BatchCosineSimilarity()
 
     def forward(self, x):
@@ -53,28 +53,40 @@ class CAFormerBackbone(nn.Module):
         return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
 
 class CAFormerStyleBackbone(nn.Module):
-    def __init__(self, model_name='caformer_m36'):
+    def __init__(self, model_name='caformer_m36', input_resolution: int = 384, heads: int = 8, out_dims: int = 768):
         super().__init__()
+        self.input_resolution = input_resolution
         caformer = create_model(model_name, pretrained=True)
-        #caformer.set_grad_checkpointing(True)
+        caformer.set_grad_checkpointing(True)
         del caformer.head
-        self.caformer = caformer
+        self.caformer: MetaFormer = caformer
 
-        self.feat_list = []
+        all_chs = (128+256+512+768)*2
+        self.head = nn.Sequential(
+            nn.Linear(all_chs, out_dims),
+            nn.SiLU(),
+            nn.Linear(out_dims, out_dims),
+        )
+        self.sim = BatchCosineSimilarity()
+
+        self.style_list = []
         self.caformer.stages[0].register_forward_hook(self.feat_hook)
         self.caformer.stages[1].register_forward_hook(self.feat_hook)
         self.caformer.stages[2].register_forward_hook(self.feat_hook)
         self.caformer.stages[3].register_forward_hook(self.feat_hook)
 
     def feat_hook(self, host, fea_int, fea_out):
-        self.feat_list.append(fea_out)
+        mean = fea_out.mean(dim=(2,3))
+        std = fea_out.std(dim=(2,3))
+        self.style_list.append(torch.cat([mean, std], dim=1))
 
     def forward(self, x):
         x = self.caformer.forward_features(x)
-
-        feat_all = self.feat_list.copy()
-        self.feat_list.clear()
-        return x, feat_all
+        style_all = torch.cat(self.style_list, dim=1)
+        self.style_list.clear()
+        feat = self.head(style_all)
+        out = self.sim(feat)
+        return out, feat + 0. * out.mean()  # 0.*out.mean() for DDP
 
 class CAFormerCatBackbone(nn.Module):
     def __init__(self, model_name='caformer_m36', input_resolution=384, heads=8, out_dims: int = 768):

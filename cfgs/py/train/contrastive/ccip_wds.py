@@ -1,10 +1,11 @@
 from functools import partial
 from typing import Tuple, Dict
+import webdataset as wds
 
 import torch
 import torchvision.transforms as T
 from rainbowneko.ckpt_manager import ckpt_saver, NekoResumer, NekoModelLoader
-from rainbowneko.data import BaseDataset
+from rainbowneko.data import BaseDataset, WebDataset
 from rainbowneko.data import PosNegBucket, BaseBucket
 from rainbowneko.data.handler import HandlerChain, ImageHandler, LoadImageHandler
 from rainbowneko.data.source import ImageFolderClassSource
@@ -13,11 +14,12 @@ from rainbowneko.models.wrapper import FeatWrapper
 from rainbowneko.parser import CfgWDModelParser, neko_cfg
 from rainbowneko.train.loss import MLCEImageLoss
 from rainbowneko.utils import CosineLR
-from torchmetrics.classification import AveragePrecision, AUROC
+from torchmetrics.classification import AveragePrecision, AUROC, CalibrationError
 
 from cfgs.py.train import train_base, tuning_base
-from evaluate import CXIPMetricContainer
+from evaluate import CXIPMetricContainer, cohens_d
 from model import CAFormerBackbone
+from data import ZerochanWebDatasetSource
 
 
 class WeakRandAugment2(T.RandAugment):
@@ -40,6 +42,15 @@ class WeakRandAugment2(T.RandAugment):
 
 ANIME_MEAN = (0.67713961, 0.618461,   0.61174436)
 ANIME_STD = (0.31741801, 0.31876716, 0.31473021)
+
+def image_pipeline(url, buffer_size=300):
+    return wds.DataPipeline(
+        wds.SimpleShardList(url),
+        wds.split_by_node,
+        wds.split_by_worker,
+        wds.tarfile_to_samples(),
+        wds.shuffle(buffer_size),
+    )
 
 
 @neko_cfg
@@ -65,7 +76,7 @@ def make_cfg():
 
         train=dict(
             train_epochs=2,
-            workers=2,
+            workers=1,
             max_grad_norm=None,
             save_step=2000,
 
@@ -92,6 +103,7 @@ def make_cfg():
             metrics=MetricGroup(
                 AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
                 roc=CXIPMetricContainer(AUROC(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
+                cohens=CXIPMetricContainer(cohens_d, key_map=('pred.pred -> pred', 'inputs.label -> label')),
             ),
         ),
 
@@ -108,10 +120,11 @@ def make_cfg():
 @neko_cfg
 def cfg_data():
     return dict(
-        dataset1=partial(BaseDataset, batch_size=128, loss_weight=1.0,
+        dataset1=partial(WebDataset, batch_size=128, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root="/nfs/ccip/ccip_v1_flat"
+                data_source1=ZerochanWebDatasetSource(
+                    pipeline=image_pipeline("/nfs/zerochan-character-w640-ws-m50-full/train/{00001..00045}.tar"),
+                    size=1<<25,
                 ),
             ),
             handler=HandlerChain(
@@ -126,22 +139,23 @@ def cfg_data():
                     ]),
                 )
             ),
-            bucket=PosNegBucket(target_size=384, pos_rate=0.5),
+            bucket=PosNegBucket(target_size=384, pos_rate=0.5, num_bucket=5031),
         )
     )
 
 @neko_cfg
 def cfg_evaluator():
     return partial(Evaluator,
-        interval=200,
+        interval=500,
         metric=MetricGroup(
             AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
             roc=CXIPMetricContainer(AUROC(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
+            cohens=CXIPMetricContainer(cohens_d, key_map=('pred.pred -> pred', 'inputs.label -> label')),
         ),
-        dataset=partial(BaseDataset, batch_size=128, loss_weight=1.0,
+        dataset=partial(WebDataset, batch_size=128, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root="/nfs/ccip/ccip_eval/eval"
+                data_source1=ZerochanWebDatasetSource(
+                    pipeline=image_pipeline("/nfs/zerochan-character-w640-ws-m50-full/test/{00001..00006}.tar")
                 ),
             ),
             handler=HandlerChain(

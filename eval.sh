@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 neko_eval_1gpu --cfg cfgs/py/eval/ccip.py

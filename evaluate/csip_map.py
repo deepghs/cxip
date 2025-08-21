@@ -7,16 +7,19 @@ class CXIPMetricContainer(MetricContainer):
         self.pred_list = []
         self.target_list = []
 
-    def update(self, pred, label):
-        for pred_cudai, target_cudai in zip(pred, label):
-            pred_cudai = pred_cudai - torch.diag_embed(torch.diag(pred_cudai))
-            same_mask = (target_cudai.unsqueeze(0) == target_cudai.unsqueeze(1)).long()
-            pos = (pred_cudai*same_mask).max(dim=1).values
-            neg = (pred_cudai*(1.-same_mask)).max(dim=1).values
-            self.pred_list.append(pos.cpu())
-            self.pred_list.append(neg.cpu())
-            self.target_list.append(torch.ones(len(target_cudai), device='cpu', dtype=torch.long))
-            self.target_list.append(torch.zeros(len(target_cudai), device='cpu', dtype=torch.long))
+    def update(self, pred, inputs):
+        args, kwargs = self.key_mapper(pred=pred, inputs=inputs)
+        pred = kwargs['pred']
+        target = kwargs['label']
+
+        pred = pred - torch.diag_embed(torch.diag(pred))
+        same_mask = (target.unsqueeze(0) == target.unsqueeze(1)).long()
+        pos = (pred*same_mask).max(dim=1).values
+        neg = (pred*(1.-same_mask)).max(dim=1).values
+        self.pred_list.append(pos.cpu())
+        self.pred_list.append(neg.cpu())
+        self.target_list.append(torch.ones(len(target), device='cpu', dtype=torch.long))
+        self.target_list.append(torch.zeros(len(target), device='cpu', dtype=torch.long))
 
     def finish(self, gather, is_local_main_process):
         pred = torch.cat(self.pred_list)  # [N,B]
