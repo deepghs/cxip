@@ -1,6 +1,6 @@
-from rainbowneko.train.data.img_label_dataset import ImageLabelDataset
-from rainbowneko.train.data.source import DataSource
-from rainbowneko.train.data.bucket import BaseBucket
+from rainbowneko.data import ImageLabelSource
+from rainbowneko.data.source import DataSource
+from rainbowneko.data.bucket import BaseBucket
 from typing import Dict
 
 class TimeContrastDataset(ImageLabelDataset):

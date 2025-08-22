@@ -4,7 +4,7 @@ from timm import create_model
 from timm.models import register_model
 from timm.models.metaformer import SepConv, Attention, MetaFormer, LayerNorm2dNoBias, LayerNormNoBias, _create_metaformer
 from torch import nn
-from rainbowneko.models.layers import BatchCosineSimilarity
+# from rainbowneko.models.layers import BatchCosineSimilarity
 from .attention import SDP_Attention
 
 from .attention_pool import AttentionPool2d, AvgAttnPooling2d
@@ -12,7 +12,8 @@ from .attention_pool import AttentionPool2d, AvgAttnPooling2d
 class BatchCosineSimilarity(nn.Module):
     def __init__(self):
         super().__init__()
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.logit_scale = nn.Parameter(torch.ones([]))
+        self.logit_bias = nn.Parameter(torch.zeros([]))
 
     def forward(self, image_features):  # x: BxN
         # normalized features
@@ -20,7 +21,7 @@ class BatchCosineSimilarity(nn.Module):
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        logits_per_image = logit_scale * torch.mm(image_features, image_features.transpose(0, 1))
+        logits_per_image = logit_scale * torch.mm(image_features, image_features.transpose(0, 1)) + self.logit_bias
 
         return logits_per_image
 

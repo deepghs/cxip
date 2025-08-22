@@ -12,7 +12,7 @@ from rainbowneko.data.source import ImageFolderClassSource
 from rainbowneko.evaluate import MetricGroup, Evaluator
 from rainbowneko.models.wrapper import FeatWrapper
 from rainbowneko.parser import CfgWDModelParser, neko_cfg
-from rainbowneko.train.loss import MLCEImageLoss
+from rainbowneko.train.loss import LossContainer
 from rainbowneko.utils import CosineLR
 from torchmetrics.classification import AveragePrecision, AUROC, CalibrationError
 
@@ -20,7 +20,7 @@ from cfgs.py.train import train_base, tuning_base
 from evaluate import CXIPMetricContainer, cohens_d
 from model import CAFormerBackbone, CAFormerStyleBackbone
 from data import StyleImageLabelSource, UniformPatch
-
+from loss import SiglipLoss
 
 class WeakRandAugment2(T.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
@@ -73,7 +73,7 @@ def make_cfg():
             max_grad_norm=None,
             save_step=1000,
 
-            loss=MLCEImageLoss(),
+            loss=LossContainer(SiglipLoss()),
 
             resume=NekoResumer(
                 start_step=0,
