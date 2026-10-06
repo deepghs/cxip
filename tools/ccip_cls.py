@@ -53,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--umap-components", type=int, default=35)
     parser.add_argument("--umap-metric", default="cosine")
     parser.add_argument("--umap-jobs", type=int, default=os.cpu_count() or 8)
+    parser.add_argument("--umap-parallel", action="store_true",
+                        help="不给 UMAP 传 random_state (传了 umap 会强制单线程, 几百万点要跑很久), 结果不再逐位可复现")
     parser.add_argument("--min-cluster-size", type=int, default=5)
     parser.add_argument("--min-samples", type=int, default=None)
     parser.add_argument("--cluster-metric", default="euclidean")
@@ -209,7 +211,7 @@ def run_umap(matrix: np.memmap, args: argparse.Namespace) -> np.ndarray:
         n_components=args.umap_components,
         metric=args.umap_metric,
         low_memory=True,
-        random_state=args.seed,
+        random_state=None if args.umap_parallel else args.seed,
         n_jobs=args.umap_jobs,
         verbose=True,
     )
