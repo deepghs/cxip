@@ -35,6 +35,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--feat-dir", type=Path, default=DEFAULT_FEAT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--file-pattern", default="*.pt", help="Glob to match feature files.")
+    parser.add_argument("--feat-npy", type=Path, default=None,
+                        help="repro/data/extract_ccip_feats.py 的输出目录 (feats_r*.npy + files_r*.json)，"
+                             "代替每张图一个 .pt 的 --feat-dir")
     parser.add_argument("--limit", type=int, default=None, help="Optional cap on number of samples.")
     parser.add_argument("--sample-rate", type=float, default=1.0,
                         help="Random subsampling probability in (0,1].")
@@ -149,6 +152,56 @@ def stream_to_memmap(
     return readonly, filenames, metadata
 
 
+def load_npy_shards(
+    feat_dir: Path,
+    memmap_path: Path,
+    dtype: str,
+    normalize: bool,
+    sample_rate: float,
+    seed: int,
+    limit,
+) -> Tuple[np.memmap, List[str], dict]:
+    """读取 extract_ccip_feats.py 的分片, 与 stream_to_memmap 一样写入 memmap; 文件名记为 {id}.pt 以兼容 clusters_to_char_labels.py"""
+    shards = sorted(feat_dir.glob("files_r*.json"))
+    if not shards:
+        raise RuntimeError(f"No files_r*.json in {feat_dir}")
+    names, arrays = [], []
+    for shard in shards:
+        with shard.open("r", encoding="utf-8") as fp:
+            names.extend(f"{name}.pt" for name in json.load(fp))
+        arrays.append(np.load(feat_dir / shard.name.replace("files_", "feats_").replace(".json", ".npy"), mmap_mode="r"))
+    order = np.argsort(names, kind="stable")  # 与 --feat-dir 的 sorted(glob) 顺序一致
+    if sample_rate < 1.0:
+        rng = np.random.default_rng(seed)
+        order = order[rng.random(len(order)) < sample_rate]
+    if limit is not None:
+        order = order[:limit]
+    offsets = np.cumsum([0] + [len(a) for a in arrays])
+    dtype_np = np.float32 if dtype == "fp32" else np.float16
+    feature_dim = arrays[0].shape[1]
+    memmap_path.parent.mkdir(parents=True, exist_ok=True)
+    matrix = np.memmap(filename=memmap_path, mode="w+", dtype=dtype_np, shape=(len(order), feature_dim))
+    for start in tqdm(range(0, len(order), 65536), desc="Loading features", unit="chunk"):
+        idx = order[start:start + 65536]
+        shard_idx = np.searchsorted(offsets, idx, side="right") - 1
+        chunk = np.empty((len(idx), feature_dim), dtype=np.float32)
+        for s in np.unique(shard_idx):
+            m = shard_idx == s
+            local = idx[m] - offsets[s]
+            sort = np.argsort(local)
+            rows = np.empty((len(local), feature_dim), dtype=np.float32)
+            rows[sort] = arrays[s][local[sort]]
+            chunk[m] = rows
+        if normalize:
+            chunk /= np.maximum(np.linalg.norm(chunk, axis=1, keepdims=True), 1e-12)
+        matrix[start:start + len(idx)] = chunk.astype(dtype_np, copy=False)
+    matrix.flush()
+    metadata = {"feature_count": len(order), "feature_dim": int(feature_dim), "dtype": str(dtype_np),
+                "normalized": normalize}
+    readonly = np.memmap(filename=memmap_path, mode="r", dtype=dtype_np, shape=(len(order), feature_dim))
+    return readonly, [names[i] for i in order], metadata
+
+
 def run_umap(matrix: np.memmap, args: argparse.Namespace) -> np.ndarray:
     reducer = umap.UMAP(
         n_neighbors=args.umap_neighbors,
@@ -219,19 +272,30 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    files = list_feature_files(args.feat_dir, args.file_pattern)
-    files = maybe_subsample(files, args.sample_rate, args.seed)
-    if args.limit is not None:
-        files = files[: args.limit]
+    if args.feat_npy is not None:
+        matrix, filenames, metadata = load_npy_shards(
+            feat_dir=args.feat_npy,
+            memmap_path=args.memmap_path,
+            dtype=args.dtype,
+            normalize=not args.no_normalize,
+            sample_rate=args.sample_rate,
+            seed=args.seed,
+            limit=args.limit,
+        )
+    else:
+        files = list_feature_files(args.feat_dir, args.file_pattern)
+        files = maybe_subsample(files, args.sample_rate, args.seed)
+        if args.limit is not None:
+            files = files[: args.limit]
 
-    matrix, filenames, metadata = stream_to_memmap(
-        files=files,
-        memmap_path=args.memmap_path,
-        dtype=args.dtype,
-        normalize=not args.no_normalize,
-        chunk_size=args.chunk_size,
-        base_dir=args.feat_dir,
-    )
+        matrix, filenames, metadata = stream_to_memmap(
+            files=files,
+            memmap_path=args.memmap_path,
+            dtype=args.dtype,
+            normalize=not args.no_normalize,
+            chunk_size=args.chunk_size,
+            base_dir=args.feat_dir,
+        )
 
     embedding = run_umap(matrix, args)
     labels = run_hdbscan(embedding, args)
