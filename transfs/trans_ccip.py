@@ -23,6 +23,8 @@ args = parser.parse_args()
 
 state = load_file(args.ckpt) if args.ckpt.endswith('.safetensors') else torch.load(args.ckpt, map_location='cpu')
 state = state.get('base', state)
+# rainbowneko 的 safetensors 把嵌套 dict 拍平成 'base:xxx'
+state = {(k[len('base:'):] if k.startswith('base:') else k): v for k, v in state.items()}
 state = {(k[len('model.'):] if k.startswith('model.') else k): v for k, v in state.items()}
 state = {dst + k[len(src):]: v for k, v in state.items() for src, dst in KEY_MAP.items() if k.startswith(src)}
 
