@@ -1,0 +1,16 @@
+{
+  "architectures": [
+    "CCIPModel"
+  ],
+  "auto_map": {
+    "AutoConfig": "configuration_ccip.CCIPConfig",
+    "AutoModel": "modeling_ccip.CCIPModel"
+  },
+  "backbone": "caformer_b36",
+  "heads": 8,
+  "input_resolution": 384,
+  "model_type": "ccip",
+  "out_dims": 768,
+  "torch_dtype": "float32",
+  "transformers_version": "4.52.0"
+}

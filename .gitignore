@@ -1221,3 +1221,15 @@ fabric.properties
 /runs
 /YOLOv8
 /exps
+
+# cxip repro
+recovered/raw/
+*.onnx
+feat*/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+.env
+wandb/
+tb_logs/

@@ -1,3 +1,5 @@
+import math
+
 import torch
 import numpy as np
 from timm import create_model
@@ -12,8 +14,9 @@ from .attention_pool import AttentionPool2d, AvgAttnPooling2d
 class BatchCosineSimilarity(nn.Module):
     def __init__(self):
         super().__init__()
-        self.logit_scale = nn.Parameter(torch.ones([]))
-        self.logit_bias = nn.Parameter(torch.zeros([]))
+        # SigLIP 初始化, 与 HF 上 AnimeCCIP / AnimeCSIP(v1~v2.1) 的 modeling 代码一致
+        self.logit_scale = nn.Parameter(torch.ones([])*math.log(10))
+        self.logit_bias = nn.Parameter(torch.ones([])*-10)
 
     def forward(self, image_features):  # x: BxN
         # normalized features

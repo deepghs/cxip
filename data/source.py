@@ -101,3 +101,30 @@ class StyleImageLabelSource(ImageLabelSource):
             'image': path,
             'label': self.cls_id_map[cls_name],
         }
+
+class StyleCharImageLabelSource(ImageLabelSource):
+    
+    def __init__(self, img_root, char_label_file, style_label_file, **kwargs):
+        super(ImageLabelSource, self).__init__(img_root, **kwargs)
+        self.cls_id_map = {}
+
+        self.char_dict = {k: v.split('||') for k, v in self._load_label_data(char_label_file).items()}
+        self.style_dict = self._load_label_data(style_label_file)
+        self.img_ids = self._load_img_ids(self.style_dict)
+
+    def _load_img_ids(self, label_dict):
+        return [x for x in label_dict.keys() if x in self.char_dict] * self.repeat
+
+    def __getitem__(self, index) -> Dict[str, Any]:
+        img_id = self.img_ids[index]
+        path = self.img_root / img_id
+        cls_name = self.style_dict.get(self.img_ids[index], None)
+        if cls_name not in self.cls_id_map:
+            self.cls_id_map[cls_name] = len(self.cls_id_map)
+
+        return {
+            'id': img_id,
+            'image': path,
+            'style': self.cls_id_map[cls_name],
+            'char': self.char_dict.get(img_id, None),
+        }

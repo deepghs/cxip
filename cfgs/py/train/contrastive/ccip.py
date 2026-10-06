@@ -1,3 +1,10 @@
+# 新版 CCIP (HF: dghstmp/AnimeCCIP, 2025-10-08) 的训练配置 [RECONSTRUCTED]
+# 相对上一次提交的改动:
+#   - loss: MLCEImageLoss -> SiglipLoss。依据: HF 权重中 sim.logit_bias = -13.948 (初始 -10)。
+#     MLCE 按行 softmax，logit_bias 的梯度恒为 0，bias 不会变，所以新版 CCIP 只能是 sigmoid/SigLIP 训的。
+#   - BatchCosineSimilarity 初始化改为 log(10)/-10 (见 model/caformer.py)
+#   - 从 anime_dino 的 ema_teacher 初始化 backbone (与上一次提交相同)
+# 导出 HF 格式: cd transfs && python trans_ccip.py --ckpt ../exps/ccip_dino/ckpts/model-xxx.safetensors --out ccip_model
 from functools import partial
 from typing import Tuple, Dict
 
@@ -11,12 +18,13 @@ from rainbowneko.data.source import ImageFolderClassSource
 from rainbowneko.evaluate import MetricGroup, Evaluator
 from rainbowneko.models.wrapper import FeatWrapper
 from rainbowneko.parser import CfgWDModelParser, neko_cfg
-from rainbowneko.train.loss import MLCEImageLoss
+from rainbowneko.train.loss import LossContainer, LossGroup
 from rainbowneko.utils import CosineLR
 from torchmetrics.classification import AveragePrecision, AUROC
 
 from cfgs.py.train import train_base, tuning_base
-from evaluate import CXIPMetricContainer
+from evaluate import CXIPMetricContainer, cohens_d
+from loss import SiglipLoss
 from model import CAFormerBackbone
 
 
@@ -46,6 +54,7 @@ ANIME_STD = (0.31741801, 0.31876716, 0.31473021)
 def make_cfg():
     return dict(
         _base_=[train_base, tuning_base],
+        exp_dir=f'exps/ccip_dino',
 
         model_part=CfgWDModelParser([
             dict(
@@ -69,7 +78,9 @@ def make_cfg():
             max_grad_norm=None,
             save_step=2000,
 
-            loss=MLCEImageLoss(),
+            # 当前 RainbowNekoEngine (>=2025-12-08, 7908b54) 要求 criterion 返回 dict，需包一层 LossGroup;
+            # 旧版引擎直接写 loss=LossContainer(SiglipLoss())
+            loss=LossGroup(siglip=LossContainer(SiglipLoss())),
 
             resume=NekoResumer(
                 start_step=0,
@@ -92,6 +103,7 @@ def make_cfg():
             metrics=MetricGroup(
                 AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
                 roc=CXIPMetricContainer(AUROC(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
+                cohens=CXIPMetricContainer(cohens_d, key_map=('pred.pred -> pred', 'inputs.label -> label')),
             ),
         ),
 
@@ -137,6 +149,7 @@ def cfg_evaluator():
         metric=MetricGroup(
             AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
             roc=CXIPMetricContainer(AUROC(task="binary"), key_map=('pred.pred -> pred', 'inputs.label -> label')),
+            cohens=CXIPMetricContainer(cohens_d, key_map=('pred.pred -> pred', 'inputs.label -> label')),
         ),
         dataset=partial(BaseDataset, batch_size=128, loss_weight=1.0,
             source=dict(
