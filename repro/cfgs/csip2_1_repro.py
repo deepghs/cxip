@@ -1,5 +1,6 @@
 # [REPRO] 由 cfgs/py/train/contrastive/csip2_1.py 生成, 只改了数据/权重路径和多卡设置 (见 repro/README.md)
 # 4 卡 x bs128 x grad_accum 2 = 原 launcher (cfgs/launcher/multi.yaml, 8 卡 x bs128) 的全局 batch 1024; SigLIP loss 不跨卡 gather, 每卡 128 不变
+# 切分: data/danbooru-artist-split-v2 (repro/data/match_isek_split.py, 最接近卡片测试集指纹的重建; 原始切分已丢失)
 # ======================================================================================
 # [PARTIALLY RECOVERED] /data/cxip/cfgs/py/train/contrastive/csip2_1.py (原文件254行)
 # - 第 "VERBATIM" 标记之后的内容: 从 Cursor 会话 35c897f4 的 read_file(offset=180) 结果中原样恢复
@@ -146,7 +147,7 @@ def cfg_data():
             source=dict(
                 data_source1=StyleImageLabelSource(
                     img_root="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train",
-                    label_file="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train_split.json",
+                    label_file="/data/neko/cxip_repro/data/danbooru-artist-split-v2/train_split.json",
                 ),
             ),
             handler=HandlerChain(
@@ -172,8 +173,8 @@ def cfg_data():
             source=dict(
                 data_source1=StyleCharImageLabelSource(
                     img_root="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train",
-                    char_label_file="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train_char_labels.json",
-                    style_label_file="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train_split.json",
+                    char_label_file="/data/neko/cxip_repro/data/danbooru-artist-split-v2/train_char_labels.json",
+                    style_label_file="/data/neko/cxip_repro/data/danbooru-artist-split-v2/train_split.json",
                 ),
             ),
             handler=HandlerChain(
@@ -210,7 +211,7 @@ def cfg_evaluator():
             source=dict(
                 data_source1=StyleImageLabelSource(
                     img_root="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/train",
-                    label_file="/data/neko/cxip_repro/data/danbooru-w640-ws-full-artist/test_split.json",
+                    label_file="/data/neko/cxip_repro/data/danbooru-artist-split-v2/test_split.json",
                 ),
             ),
             handler=HandlerChain(
