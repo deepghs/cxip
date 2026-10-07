@@ -33,6 +33,9 @@ MIN_TRAIN = 2
 DROP_CATEGORIES = {'group_or_species', 'generic_or_collective', 'multiple_characters', 'uncertain'}
 # flag_classes.py 的误报 (视觉复核确认是单一角色): v2 的 Azur_Lane/Yukikaze 文件夹里其实是舰 C 雪风
 KEEP_FLAGGED = {'Yukikaze (Kantai Collection)'}
+# variant 中 "一眼能看出是同一个角色" 的也合并 (Alter / 泳装·换职阶等; 性转不合并), 见 judge_variants.py;
+# 视觉复核的跨类同角色概率低于此值的 variant 不合并 (CCIP 看来完全不像)
+VARIANT_MIN_VISUAL = 0.2
 SHARD_BYTES = 1 << 30
 PRIORITY = {'zc800k': 0, 'v1': 1, 'v2': 2}
 
@@ -68,6 +71,17 @@ def plan():
     variants = [dict(a=classes[cands[i]['a']]['key'], b=classes[cands[i]['b']]['key'], reason=v['reason'],
                      sources=[classes[cands[i]['a']]['source'], classes[cands[i]['b']]['source']])
                 for i, v in verdicts.items() if v['verdict'] == 'variant']
+    n_variant_merge = 0
+    if (SRC / 'variant_judge.json').exists():
+        vj = json.load(open(SRC / 'variant_judge.json'))['results']
+        merged_ids = {x['id'] for x in vj if x['merge'] and x['visual'] >= VARIANT_MIN_VISUAL}
+        same += [(cands[i]['a'], cands[i]['b']) for i in merged_ids]
+        variants = [dict(v, merged=False) for v in variants]
+        for x in vj:
+            for v in variants:
+                if (v['a'], v['b']) == (x['a'], x['b']):
+                    v.update(category=x['category'], merged=x['id'] in merged_ids, visual=x['visual'], reason2=x['reason'])
+        n_variant_merge = len(merged_ids)
     root = union_find(len(classes), same)
 
     img = pd.read_parquet(SRC / 'images.parquet')
@@ -163,7 +177,8 @@ def plan():
         lines.append(f'| {s} | ' + ' | '.join(str(int(v)) for v in row) + f' | {int(row.sum())} |')
     ntr = img[img['split'] == 'train'].groupby('label').size()
     lines += ['', f'- 每类训练图: median {int(ntr.median())}, mean {ntr.mean():.1f}, max {int(ntr.max())}',
-              f'- variant 对 (未合并, 见 variants.json): {len(variants)}', '', '成员最多的合并类:']
+              f'- variant 对 {len(variants)}: 其中 {n_variant_merge} 对 (Alter/泳装·换职阶/认得出的年龄或化身变体, 视觉概率 >= '
+              f'{VARIANT_MIN_VISUAL}) 已合并, 性转/形态变化等不合并 (见 variants.json)', '', '成员最多的合并类:']
     for c in big:
         lines.append(f"- {c['name']}: " + ', '.join(f"{m['source']}:{m['key']}" for m in c['members']))
     (OUT / 'report.md').write_text('\n'.join(lines) + '\n')
