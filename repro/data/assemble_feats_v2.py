@@ -3,6 +3,8 @@
 1) python assemble_feats_v2.py need   -> 写出缺特征的图片列表 extra_labels.json (交给 extract_ccip_feats.py --label-file)
 2) python assemble_feats_v2.py build  -> 合并旧特征和新特征, 写出只包含 v2 train_split 的 train_ccip_feats_v2/
    (与 extract_ccip_feats.py 输出格式相同, tools/ccip_cls.py --feat-npy 直接读)
+可选第二个参数指定其他切分目录 (例如 danbooru-artist-split-0918) 和其中的 train split 文件名:
+   python assemble_feats_v2.py build danbooru-artist-split-0918 train_split_avail.json
 """
 import json
 import os
@@ -28,18 +30,24 @@ def index(feat_dir):
     return idx
 
 
-def main(cmd):
-    with open(SPLIT / 'train_split.json') as f:
+def main(cmd, split=None, train_file='train_split.json'):
+    global SPLIT, OUT
+    if split is not None:
+        SPLIT = DATA / split
+        OUT = SPLIT / 'train_ccip_feats'
+    with open(SPLIT / train_file) as f:
         train = json.load(f)
     if cmd == 'need':
-        have = index(OLD)
+        have = {**index(OLD), **(index(EXTRA) if EXTRA.exists() else {})}
         extra = {k: v for k, v in train.items() if k not in have}
         with open(SPLIT / 'extra_labels.json', 'w') as f:
             json.dump(extra, f)
         print(f'{len(extra)} images need features -> {SPLIT / "extra_labels.json"}')
         return
 
-    idx = {**index(OLD), **index(EXTRA)}
+    idx = {**index(OLD), **(index(EXTRA) if EXTRA.exists() else {})}
+    if split is not None and (SPLIT / 'train_ccip_feats_extra').exists():
+        idx.update(index(SPLIT / 'train_ccip_feats_extra'))
     names = sorted(train)
     missing = [n for n in names if n not in idx]
     assert not missing, f'{len(missing)} images still without features, e.g. {missing[:3]}'
@@ -58,4 +66,4 @@ def main(cmd):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    main(*sys.argv[1:])
