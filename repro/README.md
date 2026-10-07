@@ -95,4 +95,20 @@ best F1/阈值、zero-shot (每类 1/5 张参考图)。`eval/summarize.py result
 - 学到的 sim 参数: 复现 long scale exp(2.689)=14.7 / bias -9.68, HF 26.3 / -13.9 -> HF 的训练量或数据仍明显多于恢复的配置,
   推测原模型用了比 ccip_v1 (3,982 角色) 更多的角色数据
 
+**原始画师划分 (2025-09) 已恢复**
+- 规则：witha 的 `artist_tags[0]`，witha train→train、test→test，val 不用。
+- 指纹：test 182,810 / test100 22,613，与 2025-09-18 对话日志的记录完全一致。
+- 脚本 `repro/data/match_split_0918.py`，输出 `data/danbooru-artist-split-0918/`。
+
+HF 模型在原始 test100 上的结果（22,559 张，缺 54 张），数值为 PR-AUC：
+
+| | v1 | v2 | v2.1 |
+|-|-|-|-|
+| test100_0918 | 0.7455 | 0.7919 | 0.7445 |
+| 卡片 | 0.663 | 0.815 | 0.757 |
+
+排序与卡片一致。
+
+注意：下面的 v2.1 微调用的是 split v2（isek，37k 个画师），训练集包含原始 test100 的大部分画师，所以它在 test100_0918 上的分数有泄漏。
+
 **CSIP v2.1** (`exps/csip_dino_v2.1_fromv2/`, HF AnimeCSIP-v2 初始化, split v2 + 新聚类的角色伪标签, 1 epoch = 3,894 步): 训练中
