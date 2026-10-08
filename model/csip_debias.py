@@ -25,11 +25,12 @@ def eraser_mlp(in_dims, hidden_dims, out_dims):
 class CAFormerStyleDebiasBackbone(CAFormerStyleBackbone):
     def __init__(self, model_name='caformer_b36', input_resolution: int = 384, heads: int = 8, out_dims: int = 768,
                  tagger: nn.Module = None, ccip: nn.Module = None, ccip_dims: int = 768, num_char_cls: int = 100,
-                 eraser_dims: int = 512, grl_alpha: float = 1.0):
+                 eraser_dims: int = 512, grl_alpha: float = 1.0, eraser_pre_norm: bool = False):
         super().__init__(model_name, input_resolution, heads, out_dims)
         all_chs = (128+256+512+768)*2
         self.norm = nn.LayerNorm(all_chs, eps=1e-6)
         self.grl = GRL(grl_alpha)
+        self.eraser_pre_norm = eraser_pre_norm  # True: eraser 接在 LayerNorm 之前 (原版位置未知, 用于超参搜索)
 
         self.tagger = tagger
         if tagger is not None:
@@ -42,13 +43,14 @@ class CAFormerStyleDebiasBackbone(CAFormerStyleBackbone):
 
     def forward(self, image, content_image=None):
         self.caformer.forward_features(image)
-        style_raw = self.norm(torch.cat(self.style_list, dim=1))
+        style_cat = torch.cat(self.style_list, dim=1)
+        style_raw = self.norm(style_cat)
         self.style_list.clear()
         feat = self.head(style_raw)
         sim = self.sim(feat)
         out = {'pred': sim, 'feat': [feat + 0. * sim.mean()]}  # 0.*sim.mean() for DDP
 
-        style_rev = self.grl(style_raw)
+        style_rev = self.grl(style_cat if self.eraser_pre_norm else style_raw)
         if self.tagger is not None and content_image is not None:
             out['content_logits'] = self.content_eraser(style_rev)
             out['content_probs'] = self.tagger(content_image)

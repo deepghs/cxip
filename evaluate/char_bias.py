@@ -100,6 +100,45 @@ class ProbeModel(nn.Module):
         logits_char = self.char_probe(char)
         return logits_style, logits_char
 
+class RMSELoss(nn.Module):
+    """文档中 character bias 的 L(x, y) = sqrt(MSE(x, y))"""
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return torch.sqrt(nn.functional.mse_loss(pred, target))
+
+
+class RegressProbe(nn.Module):
+    """文档版本: 用一个 MLP 从 style embedding 回归 CCIP embedding, 返回 (预测, 目标) 供 RMSELoss 使用"""
+
+    def __init__(self, input_dim: int, output_dim: int, hidden_dim: int = 256):
+        super().__init__()
+        self.style_probe = ProbeMLP(input_dim, output_dim, hidden_dim)
+
+    def forward(self, style: torch.Tensor, char: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.style_probe(style), char
+
+
+class GaussianStyleDataset(Dataset):
+    """文档中的基线: 把 style embedding 换成 ε ~ N(μ, σ) (μ, σ 为训练集 style 特征逐维统计), 目标不变"""
+
+    def __init__(self, dataset: Dataset, mean: torch.Tensor, std: torch.Tensor):
+        self.dataset = dataset
+        self.mean = mean
+        self.std = std
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        _, char = self.dataset[index]
+        return torch.randn_like(self.mean) * self.std + self.mean, char
+
+
+def style_stats(dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
+    styles = torch.stack([dataset[i][0].float() for i in range(len(dataset))])
+    return styles.mean(0), styles.std(0)
+
+
 @dataclass
 class ProbeMetrics:
     train_loss: float
@@ -115,8 +154,9 @@ def train_probe(
     epochs: int,
     device: torch.device,
     lr: float,
+    method: str = "rmse",
 ) -> ProbeMetrics:
-    criterion = LogitsKLLoss()
+    criterion = RMSELoss() if method == "rmse" else LogitsKLLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     best_state = copy.deepcopy(model.state_dict())
     best_val_loss = float("inf")
@@ -274,6 +314,8 @@ def summarize_results(
     print(f"Real probe test loss     : {real_metrics.test_loss:.6f}")
     print(f"Baseline loss (mean±std) : {baseline_mean:.6f} ± {baseline_std:.6f}")
     print(f"Loss ratio (real/base)   : {ratio:.4f}")
+    # I_char < 0.05 无可辨识的角色信息; < 0.1 微量; >= 0.1 会干扰 style 识别
+    print(f"Character bias I_char    : {1 - ratio:.4f}")
 
     if ratio <= 0.5:
         print("✅ The probe finds strong content leakage in style embeddings.")
@@ -308,11 +350,12 @@ def evaluate_style_content_bias(args: argparse.Namespace) -> None:
     val_loader = build_dataloader(val_ds, args.batch_size, False, args.num_workers, device)
     test_loader = build_dataloader(test_ds, args.batch_size, False, args.num_workers, device)
 
-    model = ProbeModel(
-        input_dim=768,
-        output_dim=100,
-        hidden_dim=args.hidden_dim,
-    ).to(device)
+    def make_model():
+        if args.method == "rmse":
+            return RegressProbe(input_dim=768, output_dim=train_ds[0][1].shape[-1], hidden_dim=args.hidden_dim).to(device)
+        return ProbeModel(input_dim=768, output_dim=100, hidden_dim=args.hidden_dim).to(device)
+
+    model = make_model()
 
     real_metrics = train_probe(
         model=model,
@@ -322,27 +365,30 @@ def evaluate_style_content_bias(args: argparse.Namespace) -> None:
         epochs=args.epochs,
         device=device,
         lr=args.lr,
+        method=args.method,
     )
 
     # Baseline: shuffled pairing with same train/val split
     print("\n=== Training baseline models (shuffled pairing) ===")
     baseline_losses = []
+    if args.baseline == "gauss":
+        mean, std = style_stats(train_ds)
     for run_idx in range(args.baseline_repeats):
         print(f"\nBaseline run {run_idx + 1}/{args.baseline_repeats}")
-        # Use same split but shuffle pairing
-        train_ds_b = StyleCharDataset(style_path, char_path, shuffle=True, indices=train_indices)
-        val_ds_b = StyleCharDataset(style_path, char_path, shuffle=True, indices=val_indices)
+        if args.baseline == "gauss":
+            train_ds_b = GaussianStyleDataset(train_ds, mean, std)
+            val_ds_b = GaussianStyleDataset(val_ds, mean, std)
+        else:
+            # Use same split but shuffle pairing
+            train_ds_b = StyleCharDataset(style_path, char_path, shuffle=True, indices=train_indices)
+            val_ds_b = StyleCharDataset(style_path, char_path, shuffle=True, indices=val_indices)
         test_ds_b = val_ds_b  # Use same data for val and test
         
         train_loader_b = build_dataloader(train_ds_b, args.batch_size, True, args.num_workers, device)
         val_loader_b = build_dataloader(val_ds_b, args.batch_size, False, args.num_workers, device)
         test_loader_b = build_dataloader(test_ds_b, args.batch_size, False, args.num_workers, device)
 
-        baseline_model = ProbeModel(
-            input_dim=768,
-            output_dim=100,
-            hidden_dim=args.hidden_dim,
-        ).to(device)
+        baseline_model = make_model()
 
         baseline_metrics = train_probe(
             model=baseline_model,
@@ -352,6 +398,7 @@ def evaluate_style_content_bias(args: argparse.Namespace) -> None:
             epochs=args.epochs,
             device=device,
             lr=args.lr,
+            method=args.method,
         )
         baseline_losses.append(baseline_metrics.test_loss)
 
@@ -369,6 +416,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs.")
     parser.add_argument("--lr", type=float, default=2e-4, help="AdamW learning rate.")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="Validation split ratio per character.")
+    parser.add_argument("--method", choices=["rmse", "kl"], default="rmse",
+                        help="rmse: style->CCIP embedding 回归, L=sqrt(MSE) (文档/HF 卡片的定义); kl: 早期的双探针 KL")
+    parser.add_argument("--baseline", choices=["gauss", "shuffle"], default="gauss",
+                        help="gauss: ε~N(μ,σ) 输入 (文档/HF 卡片的定义); shuffle: 早期的随机配对")
     parser.add_argument("--baseline-repeats", type=int, default=5, help="Number of shuffled baselines.")
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker threads.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")

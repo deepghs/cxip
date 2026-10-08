@@ -48,6 +48,27 @@ class StyleContentDataset(Dataset):
         return style, content
 
 
+class GaussianStyleDataset(Dataset):
+    """文档中的基线: 把 style embedding 换成 ε ~ N(μ, σ) (μ, σ 为训练集 style 特征逐维统计), 标签不变"""
+
+    def __init__(self, dataset: Dataset, mean: torch.Tensor, std: torch.Tensor):
+        self.dataset = dataset
+        self.mean = mean
+        self.std = std
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        style, content = self.dataset[index]
+        return torch.randn_like(self.mean) * self.std + self.mean, content
+
+
+def style_stats(dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
+    styles = torch.stack([dataset[i][0].float() for i in range(len(dataset))])
+    return styles.mean(0), styles.std(0)
+
+
 class ProbeMLP(nn.Module):
     """A two-layer MLP probe that predicts content logits from style embeddings."""
 
@@ -223,6 +244,8 @@ def summarize_results(
     print(f"Real probe test loss     : {real_metrics.test_loss:.6f}")
     print(f"Baseline loss (mean±std) : {baseline_mean:.6f} ± {baseline_std:.6f}")
     print(f"Loss ratio (real/base)   : {ratio:.4f}")
+    # I_c < 0.05 无可辨识的 content 信息; < 0.1 微量; >= 0.1 会干扰 style 识别
+    print(f"Content bias I_c         : {1 - ratio:.4f}")
 
     if ratio <= 0.5:
         print("✅ The probe finds strong content leakage in style embeddings.")
@@ -252,7 +275,7 @@ def evaluate_style_content_bias(args: argparse.Namespace) -> None:
 
     model = ProbeMLP(
         input_dim=768,
-        output_dim=320,
+        output_dim=dataset[0][1].shape[-1],  # 原为 320 (tags_map 323 个标签去掉 3 个 NaN)
         hidden_dim=args.hidden_dim,
     ).to(device)
 
@@ -266,19 +289,26 @@ def evaluate_style_content_bias(args: argparse.Namespace) -> None:
         lr=args.lr,
     )
 
+    content_dim = dataset[0][1].shape[-1]
     baseline_losses = []
+    if args.baseline == "gauss":
+        mean, std = style_stats(train_ds)
     for run_idx in range(args.baseline_repeats):
-        baseline_dataset = StyleContentDataset(style_path, content_path, shuffle=True)
-        train_ds_b, val_ds_b, test_ds_b = split_dataset(
-            baseline_dataset, args.val_ratio, args.test_ratio, args.seed + run_idx + 1
-        )
+        if args.baseline == "gauss":
+            train_ds_b, val_ds_b, test_ds_b = (GaussianStyleDataset(d, mean, std) for d in (train_ds, val_ds, test_ds))
+        else:
+            # 早期版本: 打乱 style 与 content 的配对 (注意 StyleContentDataset 按 stem 取 content, 打乱列表并不会改变配对)
+            baseline_dataset = StyleContentDataset(style_path, content_path, shuffle=True)
+            train_ds_b, val_ds_b, test_ds_b = split_dataset(
+                baseline_dataset, args.val_ratio, args.test_ratio, args.seed + run_idx + 1
+            )
         train_loader_b = build_dataloader(train_ds_b, args.batch_size, True, args.num_workers, device)
         val_loader_b = build_dataloader(val_ds_b, args.batch_size, False, args.num_workers, device)
         test_loader_b = build_dataloader(test_ds_b, args.batch_size, False, args.num_workers, device)
 
         baseline_model = ProbeMLP(
-            input_dim=baseline_dataset.style.shape[1],
-            output_dim=baseline_dataset.content.shape[1],
+            input_dim=768,
+            output_dim=content_dim,
             hidden_dim=args.hidden_dim,
         ).to(device)
 
@@ -308,6 +338,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3, help="AdamW learning rate.")
     parser.add_argument("--val-ratio", type=float, default=0.1, help="Validation split ratio.")
     parser.add_argument("--test-ratio", type=float, default=0.1, help="Test split ratio.")
+    parser.add_argument("--baseline", choices=["gauss", "shuffle"], default="gauss",
+                        help="gauss: ε~N(μ,σ) 输入 (文档/HF 卡片的定义); shuffle: 早期的打乱配对")
     parser.add_argument("--baseline-repeats", type=int, default=5, help="Number of shuffled baselines.")
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker threads.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
