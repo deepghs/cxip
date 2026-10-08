@@ -3,7 +3,7 @@ source /data/neko/cxip_repro/env.sh
 R=/data/neko/cxip_repro
 S=$R/data/danbooru-artist-split-0918
 T=test100_0918=json:$S/test_split_100_avail.json:data/danbooru-w640-ws-full-artist/train
-MODELS="$R/exps/init/csip_v2_init_hf $R/exps/abl_csip_0918_siglip_only/hf_model_300 $R/exps/abl_csip_0918_w01/hf_model_300"
+MODELS="dghstmp/AnimeCSIP dghstmp/AnimeCSIP-v2 dghstmp/AnimeCSIP-v2.1 $R/exps/abl_csip_0918_siglip_only/hf_model_300 $R/exps/abl_csip_0918_w01/hf_model_300"
 for name in a01 a003 w001 a01pre; do
   E=$R/exps/abl_csip_0918_$name
   echo "[$(date)] train $name"
