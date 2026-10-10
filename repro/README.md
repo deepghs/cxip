@@ -176,3 +176,19 @@ HF 模型在原始 test100 上的结果（22,559 张，缺 54 张），数值为
 - 数据加载: 每个数据集 2 worker 只有 98 img/s (32 worker 1098 img/s), 改为 12
 - 实际训练 (含冻结 tagger + CCIP 前向): 68 s/step -> 16.8 s/step (全局 batch 2048 图), 300 步 5.7h -> 1.4h
 - 测速脚本 `repro/bench_speed.py <cfg> model|data|opt`
+
+### 修正后搜索结果 (从 v2 训练 300 步, 1 卡 bf16+compile; 2026-10-10)
+
+| 模型 | test100_0918 PR-AUC | content I_c | char I_char |
+|-|-|-|-|
+| HF v2 (起点) | 0.7919 | 0.1274 | 0.0603 |
+| HF v2.1 (目标) | 0.7445 | 0.0909 | 0.0360 |
+| siglip only (fp32, 旧) | 0.7629 | 0.1284 | 0.0678 |
+| siglip only (bf16+compile) | 0.7636 | 0.1159 | 0.0504 |
+| fix grl_alpha 1 | 0.3432 | 0.0627 | 0.0127 |
+| fix grl_alpha 0.3 | 0.5675 | 0.0741 | 0.0146 |
+| fix grl_alpha 0.1 | 0.6870 | 0.0791 | 0.0189 |
+
+- 修正后 debias 确实在去偏: alpha 0.1 的 content/char bias 已低于 HF v2.1, 但 PR-AUC 也比 v2.1 低 0.06; alpha 越大越去偏、风格越差
+- 两个 siglip-only 对照 bias 相差约 0.01, 可作为 bias 指标的噪声量级
+- 下一轮: alpha 0.03 / 0.01, 找 bias 与 v2.1 相当的点, 再跑完整 1 epoch
