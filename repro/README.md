@@ -145,3 +145,34 @@ HF 模型在原始 test100 上的结果（22,559 张，缺 54 张），数值为
 - 退化程度随 debias 权重增大而加重，所以问题出在重建的 debias 部分：eraser 的位置、GRL 强度或调度、loss 权重。
 - 原版 v2/v2.1 用的应该是弱得多的对抗强度。也可能用了 DANN 式的 alpha 预热，或者 eraser 接在别的位置。这些都没有留下记录。
 
+
+## debias 实现对比与修正 (2026-10-10)
+
+**结构与原版一致**: 从 Lark 白板 (W1vgwKraWh3QCfbg4CDj5ZDwpTc) 的形状和连线还原出拓扑: raw style emb (各 stage mean/std 拼接) -> 共用一个 `-grad` -> Content Eraser MLP -> probs -> Lbce <- 冻结 Anime Tagger probs;
+同一个 `-grad` -> Character Eraser MLP -> probs -> Lkl <- MLP(Train) <- CCIP(Freeze)。与 `model/csip_debias.py` 一致; `loss/kl.py` 与原文件快照逐字相同。白板没有 LayerNorm, eraser 接在 norm 前/后仍未知。
+
+**问题 1 (根因) eraser 根本没学**: 重建配置把 eraser 与 backbone 放在同一参数组 (lr 1e-5, wd 1e-2)。
+- 2043 步全程 content BCE ≈ 1.2-1.4 (= 2 个数据集 x ln2, 即输出全 0 的水平)
+- `csip_dino_v2.1_fromv2_0918/model-2043` 中 `content_eraser.2.weight` std 0.0256 / `.0.weight` std 0.0100, 与随机初始化 (0.0255 / 0.0100) 相同, `.2.bias` 均值 -0.01 (拟合稀疏标签需要约 -5)
+- 于是 GRL 只是在推 backbone 去骗一个随机 MLP: style PR-AUC 掉 (0.79 -> 0.66 / 0.19), bias 基本不降 (I_c 0.127 -> 0.124)
+
+**问题 2 teacher 塌缩**: char teacher MLP 可训练且在 KL 中不 detach, teacher 与 char eraser 可一起变成同一个近均匀分布 (char KL 0.42 -> 0.04 而权重仍是初始值)。
+
+**诊断 `diag_eraser_0918`** (冻结 v2 backbone, eraser lr 1e-3, 300 步): content BCE 1.39 -> 0.023 (两数据集之和), 说明 v2 特征里内容信息很容易被读出, 之前完全是 lr 问题。
+(同时训练的常数 prior 在 lr 1e-3 下 300 步来不及收敛, 不能当无信息基线。)
+
+**修正 `fix_csip_0918_*`**: eraser/teacher 单独参数组 lr 1e-3 无 wd, 用诊断的 eraser 权重初始化 (`repro/data/merge_eraser_init.py`), `detach_teacher=True, teacher_scale=3`; 搜 grl_alpha 1/0.3/0.1 + siglip-only 对照。
+
+## 训练提速 (2026-10-10)
+
+| 1 卡 H200, caformer_b36@384, bs128 | backbone 训练吞吐 |
+|-|-|
+| fp32 (原配置 mixed_precision=None, allow_tf32=False) | 17.8 img/s |
+| tf32 | 57 img/s |
+| bf16 | 107 img/s |
+| bf16 + 按 stage torch.compile | 275 img/s |
+
+- profile: bf16 下 70%+ 时间在逐元素/LayerNorm/dtype 拷贝等访存型 kernel, matmul+attention 不到 10%, 所以 compile 融合收益大; channels_last 无效; 整体 compile 会被取 style 的 forward hook 打断, 需按 stage compile (`compile_model=True`)
+- 数据加载: 每个数据集 2 worker 只有 98 img/s (32 worker 1098 img/s), 改为 12
+- 实际训练 (含冻结 tagger + CCIP 前向): 68 s/step -> 16.8 s/step (全局 batch 2048 图), 300 步 5.7h -> 1.4h
+- 测速脚本 `repro/bench_speed.py <cfg> model|data|opt`
