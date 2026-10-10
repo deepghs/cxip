@@ -5,7 +5,7 @@ R=/data/neko/cxip_repro
 S=$R/data/danbooru-artist-split-0918
 T=test100_0918=json:$S/test_split_100_avail.json:data/danbooru-w640-ws-full-artist/train
 MODELS="dghstmp/AnimeCSIP-v2 dghstmp/AnimeCSIP-v2.1 $R/exps/abl_csip_0918_siglip_only/hf_model_300"
-for name in siglip g1 g03 g01; do
+for name in ${NAMES:-siglip g1 g03 g01}; do
   E=$R/exps/fix_csip_0918_$name
   echo "[$(date)] train $name"
   cd $R/CxIP
@@ -24,8 +24,8 @@ for name in siglip g1 g03 g01; do
   MODELS="$MODELS $E/hf_model_300"
 done
 echo "[$(date)] bias eval"
-(cd $R/CxIP && python repro/eval/bias_eval.py --models $MODELS --out $R/results/bias_fix.json > $R/logs/bias_fix.log 2>&1)
+(cd $R/CxIP && python repro/eval/bias_eval.py --models $MODELS --out $R/results/bias_fix${TAG}.json > $R/logs/bias_fix${TAG}.log 2>&1)
 cd $R
 python CxIP/repro/eval/summarize.py results/fix_*.json results/abl_siglip_only*.json results/diag_v2init*.json
-tail -10 logs/bias_fix.log
+tail -10 logs/bias_fix${TAG}.log
 echo "[$(date)] DONE"
