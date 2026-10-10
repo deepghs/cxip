@@ -188,7 +188,9 @@ HF 模型在原始 test100 上的结果（22,559 张，缺 54 张），数值为
 | fix grl_alpha 1 | 0.3432 | 0.0627 | 0.0127 |
 | fix grl_alpha 0.3 | 0.5675 | 0.0741 | 0.0146 |
 | fix grl_alpha 0.1 | 0.6870 | 0.0791 | 0.0189 |
+| fix grl_alpha 0.03 | 0.7344 | 0.0938 | 0.0293 |
+| fix grl_alpha 0.01 | 0.7522 | 0.1046 | 0.0387 |
 
 - 修正后 debias 确实在去偏: alpha 0.1 的 content/char bias 已低于 HF v2.1, 但 PR-AUC 也比 v2.1 低 0.06; alpha 越大越去偏、风格越差
 - 两个 siglip-only 对照 bias 相差约 0.01, 可作为 bias 指标的噪声量级
-- 下一轮: alpha 0.03 / 0.01, 找 bias 与 v2.1 相当的点, 再跑完整 1 epoch
+- alpha 0.03 与 HF v2.1 几乎重合 (PR-AUC -0.010, I_c +0.003, I_char -0.007), 用它跑完整 1 epoch: `fix_csip_0918_g003_full` (`repro/run_fix_full.sh`)
