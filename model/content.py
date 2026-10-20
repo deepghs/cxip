@@ -65,7 +65,7 @@ def load_preprocessor(repo_id='animetimm/caformer_b36.dbv4-full'):
 
 
 def load_tag_idxs(tag_file, num_tags=None):
-    '''读取 tools/content_tags.py 生成的 csv，返回 content==1 的标签下标'''
+    '''读取 scripts/tagger/content_tags.py 生成的 csv，返回 content==1 的标签下标'''
     df = pd.read_csv(tag_file, keep_default_na=False)
     if num_tags is not None and len(df) != num_tags:
         raise ValueError(f'{tag_file} has {len(df)} tags, but tagger outputs {num_tags}')
@@ -81,7 +81,7 @@ class FrozenModule(nn.Module):
 
 class FrozenTagger(FrozenModule):
     '''
-    tag_file: tools/content_tags.py 生成的 csv，只用其中 content==1 的 (描述画面内容的) 标签;
+    tag_file: scripts/tagger/content_tags.py 生成的 csv，只用其中 content==1 的 (描述画面内容的) 标签;
     tag_idxs: 直接指定标签下标; 都不传则用全部输出
     '''
 

@@ -9,9 +9,9 @@ class SaveFeatAction(BasicAction):
     把每张图的特征单独存成 {save_dir}/{id}.pt (float32, [C])，id 保留后缀，如 12345.webp -> 12345.webp.pt
     这样各读取方都能对上:
       - eval_csip*.py: emb_dir / (label_file 的 key + ".pt")，key 形如 "12345.webp"
-      - eval_ccip_zero.py / evaluate/char_bias.py: 类别取 stem.split('_')[0]
+      - scripts/eval/eval_ccip_zero.py / evaluate/char_bias.py: 类别取 stem.split('_')[0]
       - evaluate/content_bias.py: 用 webdataset 时 id 是 __key__ (无后缀)，stem 与 probs.pkl 的 key 一致
-      - tools/ccip_cls.py -> tools/clusters_to_char_labels.py: 去掉 ".pt" 即 train_split.json 的 key
+      - scripts/char_labels/ccip_cls.py -> scripts/char_labels/clusters_to_char_labels.py: 去掉 ".pt" 即 train_split.json 的 key
     '''
 
     def __init__(self, save_dir, feat_key='feat', key_map_in=None, key_map_out=None):

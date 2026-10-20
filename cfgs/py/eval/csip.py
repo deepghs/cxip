@@ -1,4 +1,4 @@
-# [RECONSTRUCTED] 服务器上的 cfgs/py/eval/csip.py 已丢失 (eval.sh 中有引用)，按 eval/ccip.py 和 csip2_1.py 的 evaluator 重建
+# [RECONSTRUCTED] 服务器上的 cfgs/py/eval/csip.py 已丢失 (scripts/eval/eval.sh 中有引用)，按 eval/ccip.py 和 csip2_1.py 的 evaluator 重建
 #   CUDA_VISIBLE_DEVICES=1 neko_eval_1gpu --cfg cfgs/py/eval/csip.py
 import time
 from functools import partial

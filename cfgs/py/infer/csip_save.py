@@ -1,7 +1,7 @@
 # [RECONSTRUCTED] 服务器上的 cfgs/py/infer/csip_save.py 已丢失，按 ccip_save.py 的同样方式重建
 # 提取 CSIP v2/v2.1 风格特征，每张图存为 {out_dir_name}/{id}.pt (id 即 label_file 的 key，如 12345.webp -> 12345.webp.pt)
 #   neko_run --cfg cfgs/py/infer/csip_save.py ckpt_path="exps/csip_dino_v2.1/ckpts/model-xxx.safetensors" out_dir_name="feats/feat_csip_v2.1"
-# 之后: eval_csip_zero.py (emb_dir 写死为 feat/，需改成 out_dir_name)
+# 之后: scripts/eval/eval_csip_zero.py (emb_dir 写死为 feat/，需改成 out_dir_name)
 # 平铺的图片文件夹 (无 label_file) 把 StyleImageLabelSource 换成 UnLabelSource(img_root=path) 即可，见 ccip_save.py
 # v1 (无 LayerNorm) 换成 FeatWrapper + CAFormerStyleBackbone
 import torch

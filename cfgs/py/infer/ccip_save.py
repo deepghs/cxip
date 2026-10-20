@@ -1,8 +1,8 @@
-# [RECONSTRUCTED] 服务器上的 cfgs/py/infer/ccip_save.py 已丢失，按 eval.sh 中的用法重建:
+# [RECONSTRUCTED] 服务器上的 cfgs/py/infer/ccip_save.py 已丢失，按 scripts/eval/eval.sh 中的用法重建:
 #   neko_run --cfg cfgs/py/infer/ccip_save.py test_img_root="/nfs/ccip/test_ccip/" out_dir_name="feat_ccip"
 #   neko_run --cfg cfgs/py/infer/ccip_save.py test_img_root="/nfs/zerochan-character-w640-ws-m50-full/small_val_folder" out_dir_name="feat_ccip_zero"
 # test_img_root 下是平铺的图片 (文件名 {角色}_xxx.png)，每张图的特征存为 {out_dir_name}/{文件名}.pt
-# 之后: python eval_ccip_zero.py --emb_dir feat_ccip --N 40 ; python tools/ccip_cls.py --feat-dir ...
+# 之后: python scripts/eval/eval_ccip_zero.py --emb_dir feat_ccip --N 40 ; python scripts/char_labels/ccip_cls.py --feat-dir ...
 import torch
 import torchvision.transforms as T
 

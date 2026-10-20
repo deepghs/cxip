@@ -4,7 +4,7 @@
 #     MLCE 按行 softmax，logit_bias 的梯度恒为 0，bias 不会变，所以新版 CCIP 只能是 sigmoid/SigLIP 训的。
 #   - BatchCosineSimilarity 初始化改为 log(10)/-10 (见 model/caformer.py)
 #   - 从 anime_dino 的 ema_teacher 初始化 backbone (与上一次提交相同)
-# 导出 HF 格式: cd transfs && python trans_ccip.py --ckpt ../exps/ccip_dino/ckpts/model-xxx.safetensors --out ccip_model
+# 导出 HF 格式: cd export && python trans_ccip.py --ckpt ../exps/ccip_dino/ckpts/model-xxx.safetensors --out ccip_model
 from functools import partial
 from typing import Tuple, Dict
 

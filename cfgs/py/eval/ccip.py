@@ -18,7 +18,6 @@ from torchmetrics.classification import AveragePrecision, AUROC
 
 from evaluate import CXIPMetricContainer, cohens_d
 from model import CAFormerBackbone
-# from model.old.model import CCIP
 from data.source import ZerochanWebDatasetSource
 
 time_format="%Y-%m-%d-%H-%M-%S"

@@ -6,7 +6,7 @@
 # 依据 HF 原版 dghstmp/AnimeCSIP-v2(.1) 的 modeling_csip.py (原文): v2 起在 head 前加了 LayerNorm(3328, eps=1e-6)，v1 没有
 # (BatchCosineSimilarity 的 SigLIP 初始化 log(10)/-10 已改在 model/caformer.py 中)
 # eraser 接在 LayerNorm 之后还是之前无法确认，这里接在之后 (各 stage 的 mean/std 量级差异大，归一化后更好训)
-# 推理时只用 caformer + norm + head + sim；导出见 transfs/trans_csip.py (caformer.* -> backbone.*)
+# 推理时只用 caformer + norm + head + sim；导出见 export/trans_csip.py (caformer.* -> backbone.*)
 import torch
 import torch.nn.functional as F
 from torch import nn

@@ -5,8 +5,8 @@
 #   第24行原文: from data import StyleImageLabelSource, UniformPatch, CharBucket, StyleCharImageLabelSource
 # 需人工确认的项 (标 TODO): loss 权重、GRL alpha、dataset1 batch size
 # 冻结 CCIP 直接用 HF dghstmp/AnimeCCIP (2025-10-08，新版 anime_dino CCIP)
-# 流程: ccip_save.py 提取训练集 CCIP 特征 -> tools/ccip_cls.py 聚类 -> tools/clusters_to_char_labels.py
-#       -> train_char_labels.json -> 本配置训练 -> transfs/trans_csip.py 导出 -> csip_save.py + eval_csip_zero.py / evaluate/*_bias.py
+# 流程: ccip_save.py 提取训练集 CCIP 特征 -> scripts/char_labels/ccip_cls.py 聚类 -> scripts/char_labels/clusters_to_char_labels.py
+#       -> train_char_labels.json -> 本配置训练 -> export/trans_csip.py 导出 -> csip_save.py + scripts/eval/eval_csip_zero.py / evaluate/*_bias.py
 # ======================================================================================
 from functools import partial
 from typing import Tuple, Dict
@@ -44,7 +44,7 @@ ANIME_MEAN = (0.67713961, 0.618461,   0.61174436)
 ANIME_STD = (0.31741801, 0.31876716, 0.31473021)
 
 TAGGER = 'animetimm/caformer_b36.dbv4-full'
-# content eraser 擦除内容标签 + 文字/元数据标签 (签名、水印、语种、年份等)，不擦画风/构图/光效/背景等；由 tools/content_tags.py 生成
+# content eraser 擦除内容标签 + 文字/元数据标签 (签名、水印、语种、年份等)，不擦画风/构图/光效/背景等；由 scripts/tagger/content_tags.py 生成
 CONTENT_TAGS = 'data/content_tags/caformer_b36.dbv4-full.csv'
 CCIP = 'dghstmp/AnimeCCIP'
 
