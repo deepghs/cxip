@@ -5,6 +5,7 @@ from pathlib import Path
 from sklearn.datasets import make_moons
 from sklearn.cluster import DBSCAN, OPTICS
 import hdbscan
+import umap
 import json
 import pandas as pd
 from tqdm import tqdm
@@ -118,33 +119,33 @@ pred = embs @ embs.T
 pred = pred * logit_scale + logit_bias
 
 
-y_true = np.array(df_topN['ids'])
-y_true = (y_true[:, None] == y_true[None, :]).astype(int).reshape(-1)
-y_pred = pred.reshape(-1)
+# y_true = np.array(df_topN['ids'])
+# y_true = (y_true[:, None] == y_true[None, :]).astype(int).reshape(-1)
+# y_pred = pred.reshape(-1)
 
-# 2. 找到最佳阈值
-best_thresh, max_f1, all_thresholds, all_f1_scores = find_best_f1_threshold(y_true, y_pred)
+# # 2. 找到最佳阈值
+# best_thresh, max_f1, all_thresholds, all_f1_scores = find_best_f1_threshold(y_true, y_pred)
 
-print(f"找到的最佳阈值是: {best_thresh:.4f}")
-print(f"在此阈值下的最大F1分数是: {max_f1:.4f}")
+# print(f"找到的最佳阈值是: {best_thresh:.4f}")
+# print(f"在此阈值下的最大F1分数是: {max_f1:.4f}")
 
-# 3. 使用找到的最佳阈值进行预测
-y_pred_best = (y_pred >= best_thresh).astype(int)
-f1_best_manual = f1_score(y_true, y_pred_best)
-print(f"使用最佳阈值 {best_thresh:.4f} 应用于原始分数，得到的F1分数是: {f1_best_manual:.4f}")
+# # 3. 使用找到的最佳阈值进行预测
+# y_pred_best = (y_pred >= best_thresh).astype(int)
+# f1_best_manual = f1_score(y_true, y_pred_best)
+# print(f"使用最佳阈值 {best_thresh:.4f} 应用于原始分数，得到的F1分数是: {f1_best_manual:.4f}")
 
-# 4. 可视化F1分数随阈值的变化
-plt.figure(figsize=(10, 6))
-# 注意：thresholds 数组的长度是 f1_scores 长度 + 1
-plt.plot(all_thresholds, all_f1_scores, label='F1 Score')
-plt.scatter(best_thresh, max_f1, color='red', zorder=5, label=f'Best Threshold ({best_thresh:.2f})')
-plt.xlabel("Threshold (on original scores)")
-plt.ylabel("F1 Score")
-plt.title("F1 Score vs. Threshold on Raw Scores")
-plt.legend()
-plt.grid(True)
-plt.savefig('f1_scores.png', dpi=300, bbox_inches='tight')
-plt.close()  # Close the figure to free memory
+# # 4. 可视化F1分数随阈值的变化
+# plt.figure(figsize=(10, 6))
+# # 注意：thresholds 数组的长度是 f1_scores 长度 + 1
+# plt.plot(all_thresholds, all_f1_scores, label='F1 Score')
+# plt.scatter(best_thresh, max_f1, color='red', zorder=5, label=f'Best Threshold ({best_thresh:.2f})')
+# plt.xlabel("Threshold (on original scores)")
+# plt.ylabel("F1 Score")
+# plt.title("F1 Score vs. Threshold on Raw Scores")
+# plt.legend(fontsize='xx-small')
+# plt.grid(True)
+# plt.savefig('f1_scores.png', dpi=300, bbox_inches='tight')
+# plt.close()  # Close the figure to free memory
 
 
 
@@ -152,7 +153,7 @@ plt.close()  # Close the figure to free memory
 D = logit_max - pred
 
 # TSNE visualization of embedding space using precomputed distance matrix
-if True:
+if False:
     print("Running t-SNE visualization with precomputed distance matrix...")
     tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000, 
                 metric='precomputed', init='random')
@@ -182,7 +183,7 @@ if True:
     plt.xlabel('t-SNE dimension 1')
     plt.ylabel('t-SNE dimension 2')
     plt.title('t-SNE Visualization with Precomputed Distance Matrix (Top N Classes)')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='xx-small')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
@@ -194,29 +195,39 @@ if True:
     print(f"Embedding shape: {embs.shape}")
     print(f"t-SNE results shape: {tsne_results.shape}")
 
-0/0
+
 
 # print(D[:10,:10])
 
 
+umap_model = umap.UMAP(
+    n_neighbors=15,        # 控制局部结构保留，越小越关注局部
+    min_dist=0.0,          # 越小簇越紧密，常用 0.0 ~ 0.3
+    n_components=20,        # 先降到 2D 可视化，如果聚类可以先降到 10~50
+    metric='cosine'        # 如果是嵌入向量，cosine 效果更好
+)
+X_umap = umap_model.fit_transform(embs)
+
 # print(eps, min_samples)
 # db = DBSCAN(eps=eps, min_samples=min_samples, metric="precomputed")
 # db = OPTICS(eps=eps, min_samples=min_samples, metric="precomputed", n_jobs=64)
-db = hdbscan.HDBSCAN(min_cluster_size=20, core_dist_n_jobs=64)
-y_pred = db.fit_predict(D)
-y_true = np.array(df_topN['ids'])
+for min_cluster_size in range(5, 25):
+    print(min_cluster_size)
+    db = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, core_dist_n_jobs=64)
+    y_pred = db.fit_predict(X_umap)
+    y_true = np.array(df_topN['ids'])
 
-n_clusters = len(set(y_pred))
-print("N clusters:", n_clusters)
+    n_clusters = len(set(y_pred))
+    print("N clusters:", n_clusters)
 
-print("ACC (ignore noise):", clustering_accuracy(y_true, y_pred, ignore_noise=True))
-print("ACC (treat noise as class):", clustering_accuracy(y_true, y_pred, ignore_noise=False))
+    print("ACC (ignore noise):", clustering_accuracy(y_true, y_pred, ignore_noise=True))
+    print("ACC (treat noise as class):", clustering_accuracy(y_true, y_pred, ignore_noise=False))
 
-print(y_pred[:20])
-print(y_true[:20])
+    print(y_pred[:20])
+    print(y_true[:20])
 
-nmi = NormalizedMutualInfoScore()(torch.tensor(y_pred), torch.tensor(y_true))
-print("NMI:", nmi.item())
+    nmi = NormalizedMutualInfoScore()(torch.tensor(y_pred), torch.tensor(y_true))
+    print("NMI:", nmi.item())
 
-ari = adjusted_rand_score(y_pred, y_true)
-print("ARI:", ari)
+    ari = adjusted_rand_score(y_pred, y_true)
+    print("ARI:", ari)

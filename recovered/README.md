@@ -7,6 +7,12 @@
 - HF 私有仓库：`dghstmp/AnimeCSIP-v2.1`、`AnimeCSIP-v2`、`AnimeCSIP`、`AnimeCCIP`
 - 本机的 RainbowNekoEngine、AnimeDiffusion、AnimeModels 三个项目
 
+探索路线（各阶段试过什么、参数、结果、代码在哪）见 [EXPLORATION.md](EXPLORATION.md)。
+
+**状态（2026-10-20）：CCIP 和 CSIP v2.1 视为已恢复。**
+- CCIP：训练代码为原文 `cfgs/py/train/contrastive/ccip_wds.py`，HF AnimeCCIP 用的就是它和 zerochan 数据（已确认）。
+- CSIP v2.1：模型和损失按白板重建，在恢复出的原始划分上从 v2 微调 1 epoch，PR-AUC 与 content/char bias 均与 HF v2.1 吻合。复现流程、配置和结果见 [../repro/README.md](../repro/README.md)。
+
 ## 目录
 
 | 目录 | 内容 | 可信度 |
@@ -162,3 +168,13 @@ CPU、pt25 环境、随机权重，验证脚本在 `/tmp/cxip_verify/`：
   - 含 eraser 的训练 ckpt 能正常加载。
 - 真实 tagger（`verify_content_tags.py`）：`tag_file` 切片与全量输出取下标结果一致，content eraser 输出 12129；`pad_to_size` 行为与 imgutils 一致。
 - `trans_ccip.py`、`trans_csip.py` 导出后，用原版 HF 代码通过 `AutoModel` 加载，与训练模型的 max diff 为 0。导出的 config、preprocessor 和 modeling 与 HF 原版一致（只有 `transformers_version` 不同）。
+
+## 2026-10-07 补充
+
+- `eval_csip.py`、`eval_csip_zero.py` 换成快照中的最新版（分别为 0831 带 UMAP 版和 0918 的 OOD 版）。之前恢复的是 0831 的早期版本，原因是 INDEX 把早期的 read 记录误标成了 0922。
+- `evaluate/content_bias.py`、`evaluate/char_bias.py` 按 Lark 文档和 HF 卡片的定义补了最终版：
+  - 基线改为 ε~N(μ,σ)，char bias 改为 √MSE 回归 CCIP embedding，这两项都是默认设置。
+  - 旧做法保留为选项：`--baseline shuffle`、`--method kl`。
+  - 修复了 content_bias 中基线引用不存在属性导致的报错。
+  - 已在合成数据上跑通。
+- 原始画师划分（2025-09）已按指纹精确恢复，见 EXPLORATION.md 第三节。

@@ -3,6 +3,11 @@
 目标: 用恢复出来的训练代码重新训练 CCIP (dghstmp/AnimeCCIP) 和 CSIP v2.1 (dghstmp/AnimeCSIP-v2.1)，
 和 HF 上的模型在同一套评测上对比。
 
+
+**状态 (2026-10-20): CCIP 和 CSIP v2.1 视为已恢复。**
+- CCIP: HF AnimeCCIP 是用 zerochan 数据 + `cfgs/py/train/contrastive/ccip_wds.py` 训练的 (已确认)。下文 ccip_long 用的是 ccip_v1 (`ccip.py`), 所以 zerochan 测试集上的差距来自训练数据, 不是代码。
+- CSIP v2.1: 从 HF v2 微调 1 epoch, test100_0918 PR-AUC 0.7451 (HF 0.7445), csip_eval_public 0.8785 (HF 0.8723), content/char bias 0.086/0.024 (HF 0.091/0.036)。最终配置 `repro/cfgs/fix_csip_0918_g003_full.py`, 流程 `repro/run_fix_full.sh`。
+
 ## 目录
 
 ```
