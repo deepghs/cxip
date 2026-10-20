@@ -29,7 +29,7 @@
   - `data/source.py`：本地版本加上 `StyleCharImageLabelSource`。
   - `data/char_bucket.py`：`CharBucket`。
 - **v2.1 训练配置残片**：`cfgs/py/train/contrastive/csip2_1.py`，只有原文件第 180–254 行。
-- **损失**：`loss/kl.py`（`LogitsKLLoss`）、`model/loss.py`。
+- **损失**：`loss/kl.py`（`LogitsKLLoss`）、`model/loss.py` (`StyleBCELoss`，2026-10 移到 `loss/style.py`)。
 - **偏差评估**：`evaluate/content_bias.py`、`evaluate/char_bias.py`。
 - **角色伪标签**：`scripts/char_labels/ccip_cls.py`、`scripts/char_labels/ccip_cls_orig.py`，生成 `train_char_labels.json`。
 - **Tagger 相关工具**：`scripts/tagger/img2prob.py`、`scripts/tagger/tag_map.py`、`scripts/tagger/csip_sub.py`。

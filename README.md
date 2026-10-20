@@ -28,7 +28,7 @@ pip install -r requirements.txt
 ```
 model/          模型: CAFormer 骨干 (caformer.py)、v2/v2.1 训练模型 (csip_debias.py)、冻结的 tagger/CCIP (content.py)、GRL
 data/           数据源 (source.py)、按角色分组的 CharBucket (char_bucket.py)、content eraser 使用的标签表 (content_tags/)
-loss/           SigLIP、KL 损失
+loss/           SigLIP、KL 损失；2024 年路线的 InfoNCE、MLCE、三元组 style loss
 evaluate/       训练中的指标；content / character bias 探针 (content_bias.py、char_bias.py)
 actions/        推理 workflow 动作 (保存特征等)
 cfgs/
@@ -78,7 +78,7 @@ neko_train --cfg cfgs/py/train/contrastive/ccip_wds.py
 
 单卡调试可用 `neko_train_1gpu --cfg ...`。
 
-`cfgs/py/train/contrastive/` 下 2024 年各条路线的配置 (`csip_cat.py`、`csip_info_nce*.py`、`caip/cwip_info_nce.py` 等) 用的是旧版引擎接口 (`ClsEvaluatorContainer`、`CkptManagerPKL`)，在当前 RainbowNekoEngine 下无法加载，仅作为历史记录保留。
+`cfgs/py/train/contrastive/` 下还保留了 2024 年各条路线的配置 (`csip_old.py`、`csip_info_nce*.py`、`csip_cat.py`、`csip_cross.py`、`csip_style_loss.py`、`caip/cwip_info_nce.py`)，已改成当前 RainbowNekoEngine 的写法，超参数、数据增强、数据集与原版一致，路线说明见 docs/EXPLORATION.md。原来在引擎里的 InfoNCE / MLCE / style loss 移到了 `loss/`。数据路径是当时服务器上的路径；`CAFormerBackbone` 是现在的版本 (CLIP 式 AttentionPool2d)，2024 年后期用的是 AvgAttnPooling2d，所以结果不一定能完全复现。
 
 ## 导出为 HF 格式
 

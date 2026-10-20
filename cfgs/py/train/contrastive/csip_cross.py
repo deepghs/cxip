@@ -1,27 +1,30 @@
+# 2024 CSIP 三元组路线: anchor 对 pos/neg 做 cross attention 后判断是否同画风 (CAFormer-M36)
 from functools import partial
-
 from typing import Tuple, Dict
+
 import torch
-from torch import nn
-import torchvision
-from torchvision import transforms
-from torchvision.transforms import RandAugment
-from torch.nn import CrossEntropyLoss
-from torchmetrics.classification import MulticlassAccuracy, AveragePrecision
+import torchvision.transforms as T
+from rainbowneko.ckpt_manager import ckpt_saver
+from rainbowneko.data import BaseDataset, TripletBucket
+from rainbowneko.data.handler import HandlerChain, ImageHandler, LoadImageHandler
+from rainbowneko.data.source import ImageFolderClassSource
+from rainbowneko.evaluate import MetricGroup, Evaluator
+from rainbowneko.loggers import CLILogger, TBLogger
+from rainbowneko.models.wrapper import FeatWrapper
+from rainbowneko.parser import CfgModelParser, neko_cfg
+from rainbowneko.train.loss import LossContainer, LossGroup
+from rainbowneko.utils import CosineLR
+from torchmetrics.classification import AveragePrecision
 
-from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
-from rainbowneko.models.wrapper import SingleWrapper, FeatWrapper
-from rainbowneko.train.data.bucket import TripletBucket
-from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
-from rainbowneko.train.data import ImageLabelDataset
-from rainbowneko.ckpt_manager import CkptManagerPKL
-from rainbowneko.train.loggers import CLILogger, TBLogger
-
-from model.loss import StyleBCELoss
-from model import CAFormerCrossBackbone
+from cfgs.py.train import train_base, tuning_base
 from evaluate import CSIP_PN_APContainer
+from loss import StyleBCELoss
+from model import CAFormerCrossBackbone
 
-class WeakRandAugment2(transforms.RandAugment):
+CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
+CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+
+class WeakRandAugment2(T.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
         return {
             # op_name: (magnitudes, signed)
@@ -39,104 +42,111 @@ class WeakRandAugment2(transforms.RandAugment):
             #"Equalize":(torch.tensor(0.0), False),
         }
 
-TRAIN_TRANSFORM = transforms.Compose([
-    transforms.Resize(512),
-    WeakRandAugment2(),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-])
 
-EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(512),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-])
+@neko_cfg
+def make_cfg():
+    return dict(
+        _base_=[train_base, tuning_base],
+        exp_dir='exps/csip_cross_m36',
 
-config = dict(
-    _base_=[
-        'cfgs/py/train/train_base.py',
-        'cfgs/py/train/tuning_base.py',
-    ],
+        model_part=CfgModelParser([
+            dict(
+                lr=1e-4,
+                layers=[
+                    'model.caformer',
+                ],
+            ),
+            dict(
+                lr=1e-4,
+                layers=[
+                    'model.cross_attn',
+                    'model.attnpool',
+                    'model.out_layers',
+                ],
+            ),
+        ]),
 
-    exp_dir='exps/csip_cross_m36',
-    model_part=[
-        dict(
-            lr=1e-4,
-            layers=['model.caformer'], 
+        ckpt_saver=dict(
+            model=ckpt_saver(target_module='model'),
         ),
-        dict(
-            lr=1e-4,
-            layers=[
-                'model.cross_attn',
-                'model.attnpool',
-                'model.out_layers',
-            ], 
+
+        logger=[
+            partial(CLILogger, out_path='train.log', log_step=20),
+            partial(TBLogger, out_path='tb', log_step=20),
+        ],
+
+        train=dict(
+            train_epochs=30,
+            workers=4,
+            max_grad_norm=None,
+            save_step=1000,
+
+            loss=LossGroup(bce=LossContainer(StyleBCELoss(), key_map=('pred.pred -> pred',))),
+
+            optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
+
+            scale_lr=False,
+            lr_scheduler=CosineLR(
+                _partial_=True,
+                warmup_steps=100,
+            ),
+            metrics=None,
+        ),
+
+        model=dict(
+            name='csip-caformer-m36',
+            wrapper=partial(FeatWrapper, model=CAFormerCrossBackbone('caformer_m36')),
+        ),
+
+        # TripletBucket: batch_size 要是 3 的倍数
+        data_train=cfg_data(),
+        evaluator=cfg_evaluator(),
+    )
+
+@neko_cfg
+def cfg_data():
+    return dict(
+        dataset1=partial(BaseDataset, batch_size=120, loss_weight=1.0,
+            source=dict(
+                data_source1=ImageFolderClassSource(img_root='/root/autodl-tmp/datas/csip_v1/train'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(512),
+                        WeakRandAugment2(),
+                        T.RandomHorizontalFlip(),
+                        T.RandomCrop(224),
+                        T.ToTensor(),
+                        T.Normalize(CLIP_MEAN, CLIP_STD),
+                    ]),
+                )
+            ),
+            bucket=TripletBucket(target_size=384),
         )
-    ],
+    )
 
-    ckpt_manager=partial(CkptManagerPKL, saved_model=(
-        {'model':'model', 'trainable':False},
-    )),
-
-    train=dict(
-        train_epochs=30,
-        workers=4,
-        max_grad_norm=None,
-        save_step=1000,
-
-        loss=partial(StyleBCELoss),
-
-        optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
-
-        scale_lr=False,
-        scheduler=dict(
-            name='cosine',
-            num_warmup_steps=100,
-        ),
-        metrics=None,
-    ),
-
-    logger=[
-        partial(CLILogger, out_path='train.log', log_step=20),
-        partial(TBLogger, out_path='tb', log_step=20),
-    ],
-
-    model=dict(
-        name='csip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerCrossBackbone('caformer_m36'))
-    ),
-
-    evaluator=partial(EvaluatorGroup, interval=100,
-        evaluator_dict=dict(
+@neko_cfg
+def cfg_evaluator():
+    return partial(Evaluator,
+        interval=100,
+        metric=MetricGroup(
             AP=CSIP_PN_APContainer(AveragePrecision(task="binary")),
-        )
-    ),
-
-    # batch_size要是3的倍数
-    data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
+        ),
+        dataset=partial(BaseDataset, batch_size=120, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
-                    image_transforms=TRAIN_TRANSFORM,
-                ),
+                data_source1=ImageFolderClassSource(img_root='/root/autodl-tmp/datas/csip_v1/eval'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(512),
+                        T.CenterCrop(224),
+                        T.ToTensor(),
+                        T.Normalize(CLIP_MEAN, CLIP_STD),
+                    ]),
+                )
             ),
             bucket=TripletBucket(target_size=384),
         )
-    ),
-
-    data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=120, loss_weight=1.0,
-            source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
-                    image_transforms=EVAL_TRANSFORM,
-                ),
-            ),
-            bucket=TripletBucket(target_size=384),
-        )
-    ),
-)
+    )

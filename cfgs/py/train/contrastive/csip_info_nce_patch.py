@@ -1,30 +1,34 @@
+# 2024 CSIP v1: 随机小块拼接 (CropAndStitch) 打乱内容，NoisyInfoNCE
 from functools import partial
-
 from typing import Tuple, Dict
-import torch
-from torch import nn
-import torchvision
-from torchvision import transforms
-from torchvision.transforms import RandAugment
-from torch.nn import CrossEntropyLoss
-from torchmetrics.classification import MulticlassAccuracy, AveragePrecision
 
-from rainbowneko.evaluate import EvaluatorGroup, ClsEvaluatorContainer
-from rainbowneko.models.wrapper import SingleWrapper, FeatWrapper
-from rainbowneko.train.data.bucket import PosNegBucket
-from rainbowneko.train.data.source import IndexSource, ImageFolderClassSource
-from rainbowneko.train.loss import MLCEImageLoss, NoisyInfoNCELoss
-from rainbowneko.train.data import ImageLabelDataset
-from rainbowneko.ckpt_manager import CkptManagerPKL
-from rainbowneko.train.loggers import CLILogger, TBLogger
-from model import CAFormerBackbone, SwinV2Backbone
-from evaluate import CSIPmAPContainer
-from PIL import Image
+import torch
+import torchvision.transforms as T
+from rainbowneko.ckpt_manager import ckpt_saver
+from rainbowneko.data import BaseDataset, PosNegBucket
+from rainbowneko.data.handler import HandlerChain, ImageHandler, LoadImageHandler
+from rainbowneko.data.source import ImageFolderClassSource
+from rainbowneko.evaluate import MetricGroup, Evaluator
+from rainbowneko.loggers import CLILogger, TBLogger
+from rainbowneko.models.wrapper import FeatWrapper
+from rainbowneko.parser import CfgModelParser, neko_cfg
+from rainbowneko.train.loss import LossContainer, LossGroup
+from rainbowneko.utils import CosineLR
+from torchmetrics.classification import AveragePrecision
 import random
+from PIL import Image
+
+from cfgs.py.train import train_base, tuning_base
+from evaluate import CXIPMetricContainer
+from loss import NoisyInfoNCELoss
+from model import CAFormerBackbone, SwinV2Backbone
+
+KEY_MAP = ('pred.pred -> pred', 'inputs.label -> label')
+FEAT_KEY_MAP = ('pred.feat.0 -> feat', 'inputs.label -> label')
 
 img_size = 448
 
-class WeakRandAugment2(transforms.RandAugment):
+class WeakRandAugment2(T.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
         return {
             # op_name: (magnitudes, signed)
@@ -64,99 +68,104 @@ class CropAndStitch:
         return stitched_image
 
 
-TRAIN_TRANSFORM = transforms.Compose([
-    transforms.Resize(640),
-    WeakRandAugment2(),
-    transforms.RandomHorizontalFlip(),
-    #transforms.RandomCrop(384),
-    CropAndStitch(img_size, 14),
-    transforms.ToTensor(),
-    #transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-])
+@neko_cfg
+def make_cfg():
+    return dict(
+        _base_=[train_base, tuning_base],
+        exp_dir='exps/csip_v1_noisy_info_nce_swinv2-p448-patch',
 
-EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(640),
-    transforms.CenterCrop(img_size),
-    transforms.ToTensor(),
-    #transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-])
+        model_part=CfgModelParser([
+            dict(
+                lr=1e-4,
+                layers=[
+                    '',
+                ],  # train all layers
+            ),
+        ]),
 
-config = dict(
-    _base_=[
-        'cfgs/py/train/train_base.py',
-        'cfgs/py/train/tuning_base.py',
-    ],
-
-    exp_dir='exps/csip_v1_noisy_info_nce_swinv2-p448-patch',
-    logger=[
-        partial(CLILogger, out_path='train.log', log_step=20),
-        partial(TBLogger, out_path='tb_log', log_step=10),
-    ],
-
-    model_part=[
-        dict(
-            lr=1e-4,
-            layers=[''],  # train all layers
-        )
-    ],
-
-    ckpt_manager=partial(CkptManagerPKL, saved_model=(
-        {'model':'model', 'trainable':False},
-    )),
-
-    train=dict(
-        train_epochs=100,
-        workers=8,
-        max_grad_norm=None,
-        save_step=1000,
-
-        loss=partial(NoisyInfoNCELoss, temperature=1/16.),
-
-        optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
-
-        scale_lr=False,
-        scheduler=dict(
-            name='cosine',
-            num_warmup_steps=100,
+        ckpt_saver=dict(
+            model=ckpt_saver(target_module='model'),
         ),
-        metrics=None,
-    ),
 
-    model=dict(
-        name='csip-swinv2-base',
-        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
-        #wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=img_size))
-    ),
+        logger=[
+            partial(CLILogger, out_path='train.log', log_step=20),
+            partial(TBLogger, out_path='tb_log', log_step=10),
+        ],
 
-    evaluator=partial(EvaluatorGroup, interval=100,
-        evaluator_dict=dict(
-            AP=CSIPmAPContainer(AveragePrecision(task="binary")),
-        )
-    ),
+        train=dict(
+            train_epochs=100,
+            workers=8,
+            max_grad_norm=None,
+            save_step=1000,
 
-    data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
+            loss=LossGroup(nce=LossContainer(NoisyInfoNCELoss(temperature=1/16.), key_map=FEAT_KEY_MAP)),
+
+            optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
+
+            scale_lr=False,
+            lr_scheduler=CosineLR(
+                _partial_=True,
+                warmup_steps=100,
+            ),
+            metrics=None,
+        ),
+
+        model=dict(
+            name='csip-swinv2-base',
+            # 原配置这里是 input_resolution=384，与 img_size=448 的输入对不上 (AttentionPool2d 的位置编码按分辨率固定)，改为 img_size
+            wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=img_size)),
+            #wrapper=partial(FeatWrapper, model=SwinV2Backbone('hf-hub:SmilingWolf/wd-swinv2-tagger-v3', img_size=img_size)),
+        ),
+
+        data_train=cfg_data(),
+        evaluator=cfg_evaluator(),
+    )
+
+@neko_cfg
+def cfg_data():
+    return dict(
+        dataset1=partial(BaseDataset, batch_size=64, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/train',
-                    image_transforms=TRAIN_TRANSFORM,
-                ),
+                data_source1=ImageFolderClassSource(img_root='/root/autodl-tmp/datas/csip_v1/train'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(640),
+                        WeakRandAugment2(),
+                        T.RandomHorizontalFlip(),
+                        #T.RandomCrop(384),
+                        CropAndStitch(img_size, 14),
+                        T.ToTensor(),
+                        T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                    ]),
+                )
             ),
             bucket=PosNegBucket(target_size=img_size, pos_rate=0.5),
         )
-    ),
+    )
 
-    data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=64, loss_weight=1.0,
+@neko_cfg
+def cfg_evaluator():
+    return partial(Evaluator,
+        interval=100,
+        metric=MetricGroup(
+            AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=KEY_MAP),
+        ),
+        dataset=partial(BaseDataset, batch_size=64, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/root/autodl-tmp/datas/csip_v1/eval',
-                    image_transforms=EVAL_TRANSFORM,
-                ),
+                data_source1=ImageFolderClassSource(img_root='/root/autodl-tmp/datas/csip_v1/eval'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(640),
+                        T.CenterCrop(img_size),
+                        T.ToTensor(),
+                        T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                    ]),
+                )
             ),
             bucket=PosNegBucket(target_size=img_size, pos_rate=0.5),
         )
-    ),
-)
+    )

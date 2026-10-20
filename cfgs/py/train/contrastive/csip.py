@@ -12,7 +12,7 @@ from rainbowneko.data.source import ImageFolderClassSource
 from rainbowneko.evaluate import MetricGroup, Evaluator
 from rainbowneko.models.wrapper import FeatWrapper
 from rainbowneko.parser import CfgWDModelParser, neko_cfg
-from rainbowneko.train.loss import LossContainer
+from rainbowneko.train.loss import LossContainer, LossGroup
 from rainbowneko.utils import CosineLR
 from torchmetrics.classification import AveragePrecision, AUROC, CalibrationError
 
@@ -73,7 +73,7 @@ def make_cfg():
             max_grad_norm=None,
             save_step=1000,
 
-            loss=LossContainer(SiglipLoss()),
+            loss=LossGroup(siglip=LossContainer(SiglipLoss(), key_map=('pred.pred -> pred', 'inputs.label -> label'))),
 
             resume=NekoResumer(
                 start_step=0,

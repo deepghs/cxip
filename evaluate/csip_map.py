@@ -33,45 +33,54 @@ class CXIPMetricContainer(MetricContainer):
         return v_metric.item()
 
 class CSIPTripletAPContainer(MetricContainer):
-    def __init__(self, evaluator):
-        super().__init__(evaluator)
+    """TripletBucket (anchor / positive / negative 三段) 上，用多层特征的 Gram 距离区分正负对。"""
+
+    def __init__(self, metric, device='cpu', key_map=('pred.feat -> feat',)):
+        super().__init__(metric, device=device, key_map=key_map)
         self.style_sim = StyleSimilarity(batch_mean=True)
 
     def reset(self):
         self.pred_list = []
         self.target_list = []
 
-    def update(self, pred, target):
-        for pred_cudai, target_cudai in zip(pred['feat'], target['label']):
-            query = [item[target_cudai == 0, ...] for item in pred_cudai]
-            positive_key = [item[target_cudai == 1, ...] for item in pred_cudai]
-            negative_keys = [item[target_cudai == 2, ...] for item in pred_cudai]
+    def update(self, pred, inputs):
+        args, kwargs = self.key_mapper(pred=pred, inputs=inputs)
+        feat = kwargs['feat']  # list([B,C,H,W])
 
-            sim_pos = sum(self.style_sim(q, pos) for q, pos in zip(query, positive_key)) / len(query)
-            sim_neg = sum(self.style_sim(q, neg) for q, neg in zip(query, negative_keys)) / len(query)
+        triplets = [item.chunk(3) for item in feat]
+        sim_pos = sum(self.style_sim(q, pos) for q, pos, neg in triplets) / len(triplets)
+        sim_neg = sum(self.style_sim(q, neg) for q, pos, neg in triplets) / len(triplets)
 
-            self.pred_list.append(1.-sim_pos.cpu())
-            self.pred_list.append(1.-sim_neg.cpu())
-            self.target_list.append(torch.ones(len(query[0]), device='cpu', dtype=torch.long))
-            self.target_list.append(torch.zeros(len(query[0]), device='cpu', dtype=torch.long))
+        self.pred_list.append(1. - sim_pos.cpu())
+        self.pred_list.append(1. - sim_neg.cpu())
+        self.target_list.append(torch.ones(len(sim_pos), device='cpu', dtype=torch.long))
+        self.target_list.append(torch.zeros(len(sim_neg), device='cpu', dtype=torch.long))
 
-    def evaluate(self):
-        pred = torch.cat(self.pred_list) #[N]
-        target = torch.cat(self.target_list) #[N]
-        return self.evaluator(pred, target)
+    def finish(self, gather, is_local_main_process):
+        pred = gather(torch.cat(self.pred_list))  # [N]
+        target = gather(torch.cat(self.target_list))  # [N]
+        return self.metric(pred, target).item()
 
 class CSIP_PN_APContainer(MetricContainer):
+    """模型输出前一半为 (anchor, pos)、后一半为 (anchor, neg) 的同画风概率 (CAFormerCat/CrossBackbone)。"""
+
+    def __init__(self, metric, device='cpu', key_map=('pred.pred -> pred',)):
+        super().__init__(metric, device=device, key_map=key_map)
+
     def reset(self):
         self.pred_list = []
         self.target_list = []
 
-    def update(self, pred, target):
-        for pred_cudai, target_cudai in zip(pred['pred'], target['label']):
-            self.pred_list.append(pred_cudai.cpu())
-            self.target_list.append(torch.ones(len(pred_cudai)//2, device='cpu', dtype=torch.long))
-            self.target_list.append(torch.zeros(len(pred_cudai)//2, device='cpu', dtype=torch.long))
+    def update(self, pred, inputs):
+        args, kwargs = self.key_mapper(pred=pred, inputs=inputs)
+        pred = kwargs['pred']  # [B]
+        n_pos = len(pred) // 2
 
-    def evaluate(self):
-        pred = torch.cat(self.pred_list) #[N,B]
-        target = torch.cat(self.target_list) #[N]
-        return self.evaluator(pred, target)
+        self.pred_list.append(pred.cpu())
+        self.target_list.append(torch.ones(n_pos, device='cpu', dtype=torch.long))
+        self.target_list.append(torch.zeros(len(pred) - n_pos, device='cpu', dtype=torch.long))
+
+    def finish(self, gather, is_local_main_process):
+        pred = gather(torch.cat(self.pred_list))  # [N]
+        target = gather(torch.cat(self.target_list))  # [N]
+        return self.metric(pred, target).item()

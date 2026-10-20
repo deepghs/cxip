@@ -1,31 +1,32 @@
+# 2024 caip 路线: 只建了模板 (数据仍是 csip_v1)，CAFormer-M36 + NoisyInfoNCE
 from functools import partial
 from typing import Tuple, Dict
 
 import torch
-import torchvision
-from rainbowneko.ckpt_manager import CkptManagerPKL
-from rainbowneko.evaluate import EvaluatorGroup
+import torchvision.transforms as T
+from rainbowneko.ckpt_manager import ckpt_saver
+from rainbowneko.data import BaseDataset, PosNegBucket
+from rainbowneko.data.handler import HandlerChain, ImageHandler, LoadImageHandler
+from rainbowneko.data.source import ImageFolderClassSource
+from rainbowneko.evaluate import MetricGroup, Evaluator
+from rainbowneko.loggers import CLILogger, TBLogger
 from rainbowneko.models.wrapper import FeatWrapper
-from rainbowneko.train.data import ImageLabelDataset
-from rainbowneko.train.data.bucket import PosNegBucket
-from rainbowneko.train.data.source import ImageFolderClassSource
-from rainbowneko.train.loggers import CLILogger, TBLogger
-from rainbowneko.train.loss import InfoNCELoss, NoisyInfoNCELoss
-from torch import nn
+from rainbowneko.parser import CfgModelParser, neko_cfg
+from rainbowneko.train.loss import LossContainer, LossGroup
+from rainbowneko.utils import CosineLR
 from torchmetrics.classification import AveragePrecision
-from torchvision import transforms
 
-from evaluate import CSIPmAPContainer
+from cfgs.py.train import train_base, tuning_base
+from evaluate import CXIPMetricContainer
+from loss import NoisyInfoNCELoss
 from model import CAFormerBackbone
 
-num_classes = 10
+CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
+CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+KEY_MAP = ('pred.pred -> pred', 'inputs.label -> label')
+FEAT_KEY_MAP = ('pred.feat.0 -> feat', 'inputs.label -> label')
 
-def load_resnet():
-    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
-
-class WeakRandAugment2(transforms.RandAugment):
+class WeakRandAugment2(T.RandAugment):
     def _augmentation_space(self, num_bins: int, image_size: Tuple[int, int]) -> Dict[str, Tuple[torch.Tensor, bool]]:
         return {
             # op_name: (magnitudes, signed)
@@ -43,95 +44,102 @@ class WeakRandAugment2(transforms.RandAugment):
             "Equalize":(torch.tensor(0.0), False),
         }
 
-TRAIN_TRANSFORM = transforms.Compose([
-    transforms.Resize(512),
-    WeakRandAugment2(),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomResizedCrop(384),
-    transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-])
 
-EVAL_TRANSFORM = transforms.Compose([
-    transforms.Resize(384),
-    transforms.CenterCrop(384),
-    transforms.ToTensor(),
-    transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-])
+@neko_cfg
+def make_cfg():
+    return dict(
+        _base_=[train_base, tuning_base],
+        exp_dir='exps/full_ds_caip_v1_exp_info_nce',
 
-config = dict(
-    _base_=[
-        'cfgs/py/train/train_base.py',
-        'cfgs/py/train/tuning_base.py',
-    ],
+        model_part=CfgModelParser([
+            dict(
+                lr=1e-4,
+                layers=[
+                    '',
+                ],  # train all layers
+            ),
+        ]),
 
-    model_part=[
-        dict(
-            lr=1e-4,
-            layers=[''],  # train all layers
-        )
-    ],
-
-    ckpt_manager=partial(CkptManagerPKL, saved_model=(
-        {'model':'model', 'trainable':False},
-    )),
-
-    exp_dir='exps/full_ds_caip_v1_exp_info_nce',
-    logger=[
-        partial(CLILogger, out_path='train.log', log_step=20),
-        partial(TBLogger, out_path='tb_log', log_step=10),
-    ],
-
-    train=dict(
-        train_epochs=100,
-        workers=2,
-        max_grad_norm=None,
-        save_step=100,
-
-        loss=partial(NoisyInfoNCELoss, temperature=1/16.),
-
-        optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
-
-        scale_lr=False,
-        scheduler=dict(
-            name='cosine',
-            num_warmup_steps=100,
+        ckpt_saver=dict(
+            model=ckpt_saver(target_module='model'),
         ),
-        metrics=None,
-    ),
 
-    model=dict(
-        name='caip-caformer-m36',
-        wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384))
-    ),
+        logger=[
+            partial(CLILogger, out_path='train.log', log_step=20),
+            partial(TBLogger, out_path='tb_log', log_step=10),
+        ],
 
-    evaluator=partial(EvaluatorGroup, interval=100,
-        evaluator_dict=dict(
-            AP=CSIPmAPContainer(AveragePrecision(task="binary")),
-        )
-    ),
+        train=dict(
+            train_epochs=100,
+            workers=2,
+            max_grad_norm=None,
+            save_step=100,
 
-    data_train=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
+            loss=LossGroup(nce=LossContainer(NoisyInfoNCELoss(temperature=1/16.), key_map=FEAT_KEY_MAP)),
+
+            optimizer=partial(torch.optim.AdamW, weight_decay=5e-4),
+
+            scale_lr=False,
+            lr_scheduler=CosineLR(
+                _partial_=True,
+                warmup_steps=100,
+            ),
+            metrics=None,
+        ),
+
+        model=dict(
+            name='caip-caformer-m36',
+            wrapper=partial(FeatWrapper, model=CAFormerBackbone('caformer_m36', input_resolution=384)),
+        ),
+
+        data_train=cfg_data(),
+        evaluator=cfg_evaluator(),
+    )
+
+@neko_cfg
+def cfg_data():
+    return dict(
+        dataset1=partial(BaseDataset, batch_size=128, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_v1',
-                    image_transforms=TRAIN_TRANSFORM,
-                ),
+                data_source1=ImageFolderClassSource(img_root='/data/csip_v1'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(512),
+                        WeakRandAugment2(),
+                        T.RandomHorizontalFlip(),
+                        T.RandomResizedCrop(384),
+                        T.ToTensor(),
+                        T.Normalize(CLIP_MEAN, CLIP_STD),
+                    ]),
+                )
             ),
             bucket=PosNegBucket(target_size=384, pos_rate=0.5),
         )
-    ),
+    )
 
-    data_eval=dict(
-        dataset1=partial(ImageLabelDataset, batch_size=128, loss_weight=1.0,
+@neko_cfg
+def cfg_evaluator():
+    return partial(Evaluator,
+        interval=100,
+        metric=MetricGroup(
+            AP=CXIPMetricContainer(AveragePrecision(task="binary"), key_map=KEY_MAP),
+        ),
+        dataset=partial(BaseDataset, batch_size=128, loss_weight=1.0,
             source=dict(
-                data_source1=ImageFolderClassSource(
-                    img_root=r'/data/csip_eval_v0',
-                    image_transforms=EVAL_TRANSFORM,
-                ),
+                data_source1=ImageFolderClassSource(img_root='/data/csip_eval_v0'),
+            ),
+            handler=HandlerChain(
+                load=LoadImageHandler(),
+                image=ImageHandler(transform=T.Compose([
+                        T.Resize(384),
+                        T.CenterCrop(384),
+                        T.ToTensor(),
+                        T.Normalize(CLIP_MEAN, CLIP_STD),
+                    ]),
+                )
             ),
             bucket=PosNegBucket(target_size=384, pos_rate=0.5),
         )
-    ),
-)
+    )
