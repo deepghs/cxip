@@ -1,0 +1,96 @@
+# 主队列 (CCIP P1 与 CSIP P2 交替; CSIP 优先: CCIP 的跨画风正样本依赖新 CSIP)
+# 2026-10-20 19:50: CCIP 非"训哪些层"类消融改为在 ft_last12 上做 (与全量打平且快 1.6 倍), 前缀 l12_; 参照 ft_last12 / ft_last12_rerun / ft_last12_seed1
+# 20:20: l12_arc_batchneg FAST 0.771 (+0.011, 且无后期回落) -> 其余 l12 消融叠加 arc_negatives=batch, 前缀 l12b_, 参照 l12_arc_batchneg / l12b_seed1
+# 20:50: csip_p2/base test100_0918 0.479 << 旧 CSIP v2 0.792 (同集): 补 CLS/query 头与 stats+CLS 头对照 (head_query / stats_cls)
+# 21:06: l12b_xstyle = CCIP 合并集 + Danbooru 单角色图 (ccip-danbooru-xstyle-v1, 104 万张 / 3.9 万类), 同类 K 张尽量来自不同画师 -> 跨画风正样本
+# 21:55: CSIP q_siglip (query 头 + 只用 SigLIP) t100 0.641 (+0.089) -> 其余 CSIP 消融改在它上面做 (前缀 q_); 去掉统计量头专用消融与 LoRA; 加 4 倍预算探针 q_x4
+# 23:20 加 q_x4_arc (300k 时每个画师类只被访问约 2 次, "ArcFace 伤 CSIP" 可能是短预算假象, 在 4 倍预算下复查) 与 l12b_x4 (CCIP 预算斜率)
+# 01:00 q_res512 提前到 q_ft_last12 之后: q_x4 整图评测 +0.06, 分辨率成为 CSIP 最终配方的关键问题
+# 03:05 q_cross0 提前到 q_res512 之后: CSIP 最终配方只差分辨率与交叉成组两项, 之后插入 CSIP final
+# 03:50 插入 CSIP 最终长跑 (csip_final.py: q_x4 配方, 6M 样本, 末 15% 512, EMA, 断点续训), 预计 5 小时
+# 04:10 CSIP final 之后先跑全部 CCIP 消融 (决定 CCIP final), 再跑 CSIP 的 C′ / 旧配方对照 (分析用)
+# 04:15 加 l12b_res512_tail (末 15% 换 512, 评测 512): CCIP final 是否也做 FixRes 式高分辨率收尾
+# 04:30 加 l8b (只训最后 8 层): blk16_23 (统一 lr) 已与只训后 12 层持平, 检验 CCIP final 能否再省 1/3 反传
+# 05:45 ccip_p1/old_recipe 移到队尾: 只用于归因 (骨干 vs 配方), 不影响 CCIP final
+@cfg v3/configs/ccip_p1_base.py
+ccip_p1/base
+ccip_p1/ft_last12 model.finetune=last_n model.n_last=12
+ccip_p1/ft_lora model.finetune=lora optim.lr_backbone=2e-4 optim.layer_decay=1.0
+ccip_p1/loss_siglip_only loss.arc_weight=0
+csip_p2/base cfg=v3/configs/csip_p2_base.py
+ccip_p1/ft_last12_rerun model.finetune=last_n model.n_last=12
+ccip_p1/l12_arc_batchneg model.finetune=last_n model.n_last=12 loss.arc_negatives=batch
+ccip_p1/loss_arc_only loss.siglip_weight=0
+csip_p2/cross0 cfg=v3/configs/csip_p2_base.py data.cross_frac=0.0 data.avoid_key=None
+csip_p2/head_query cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16
+ccip_p1/l12b_xstyle model.finetune=last_n model.n_last=12 loss.arc_negatives=batch data.index=['/data/neko/cxip_v3/data/ccip-merged-v1-index/index/train.parquet','/data/neko/cxip_v3/data/ccip-danbooru-xstyle-v1/index/train.parquet'] data.avoid_key=artist_id
+csip_p2/q_siglip cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0
+csip_p2/loss_siglip_only cfg=v3/configs/csip_p2_base.py loss.arc_weight=0
+ccip_p1/pool_cls model.pool=cls
+ccip_p1/ld100 optim.layer_decay=1.0
+ccip_p1/l12b_seed1 model.finetune=last_n model.n_last=12 loss.arc_negatives=batch seed=1
+csip_p2/q_x4 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 optim.total_samples=1200000 eval.every_samples=200000
+ccip_p1/blk00_07 model.finetune=blocks model.blocks=[0,1,2,3,4,5,6,7] optim.layer_decay=1.0
+csip_p2/q_x4_arc cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=1.0 optim.total_samples=1200000 eval.every_samples=200000
+csip_p2/q_seed1 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 seed=1
+ccip_p1/blk08_15 model.finetune=blocks model.blocks=[8,9,10,11,12,13,14,15] optim.layer_decay=1.0
+ccip_p1/l12b_x4 model.finetune=last_n model.n_last=12 loss.arc_negatives=batch optim.total_samples=1200000 eval.every_samples=200000
+csip_p2/q_ft_last12 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 model.finetune=last_n model.n_last=12
+csip_p2/q_res512 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 data.res=512 model.grad_ckpt=24
+csip_p2/q_cross0 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 data.cross_frac=0.0 data.avoid_key=None
+ccip_p1/blk16_23 model.finetune=blocks model.blocks=[16,17,18,19,20,21,22,23] optim.layer_decay=1.0
+final/csip_teacher_v1 cfg=v3/configs/csip_final.py
+ccip_p1/l12b_no_lp model.finetune=last_n model.n_last=12 optim.lp_samples=0 loss.arc_negatives=batch
+ccip_p1/l12b_res512_tail model.finetune=last_n model.n_last=12 loss.arc_negatives=batch data.res_schedule=[[0.85,512]] eval.res=512
+ccip_p1/l8b model.finetune=last_n model.n_last=8 loss.arc_negatives=batch
+ccip_p1/l12b_samp_alpha1 model.finetune=last_n model.n_last=12 data.alpha=1.0 loss.arc_negatives=batch
+ccip_p1/l12b_samp_nogroup model.finetune=last_n model.n_last=12 data.group_frac=0.0 loss.arc_negatives=batch
+ccip_p1/l12b_pool_cls_mean model.finetune=last_n model.n_last=12 model.pool=cls_mean loss.arc_negatives=batch
+ccip_p1/l12b_lr4e-5 model.finetune=last_n model.n_last=12 optim.lr_backbone=4e-5 optim.lr_head=4e-4 loss.arc_negatives=batch
+ccip_p1/ft_last6 model.finetune=last_n model.n_last=6
+ccip_p1/l12b_res256 model.finetune=last_n model.n_last=12 data.res=256 loss.arc_negatives=batch
+ccip_p1/l12b_pa model.finetune=last_n model.n_last=12 loss.arc_negatives=batch data.index=/data/neko/cxip_v3/data/ccip-pseudo-artist-v1/train.parquet data.cross_key=pseudo_artist data.cross_frac=0.25
+# CSIP 去偏一轮 (2026-10-21): 从 teacher_v1 续训 600k, 对照 + 交叉成组 0.5 + 标签/角色混淆擦除 (λ 两档)
+csip_p2/dft_ctrl cfg=v3/configs/csip_debias.py
+csip_p2/dft_cross50 cfg=v3/configs/csip_debias.py data.cross_frac=0.5
+csip_p2/dft_tag1 cfg=v3/configs/csip_debias.py debias.tag_weight=1.0
+csip_p2/dft_char1 cfg=v3/configs/csip_debias.py debias.char_weight=1.0
+csip_p2/dft_tag01 cfg=v3/configs/csip_debias.py debias.tag_weight=0.1
+csip_p2/dft_char01 cfg=v3/configs/csip_debias.py debias.char_weight=0.1
+csip_p2/dft_tag003 cfg=v3/configs/csip_debias.py debias.tag_weight=0.03
+csip_p2/dft_char003 cfg=v3/configs/csip_debias.py debias.char_weight=0.03
+csip_p2/dft_char001 cfg=v3/configs/csip_debias.py debias.char_weight=0.01
+csip_p2/dft_tag001 cfg=v3/configs/csip_debias.py debias.tag_weight=0.01
+# 画风识别再提升 (错误分析: 年份差 ≥6 的正对召回 0.55、彩色/黑白正对 0.64), 同样从 teacher_v1 续训, 对照 dft_ctrl
+# 去偏定稿候选: tag λ=0.01 + 后半段 512 (dft_ctrl 只训 384 使 native 0918 −0.017), 附同日程对照
+csip_p2/dft_tag001_r512 cfg=v3/configs/csip_debias.py debias.tag_weight=0.01 data.res_schedule=[[0.5,512]]
+# (取消: dft_r640 已证明 640 续训更好, 512 对照不再需要) csip_p2/dft_ctrl_r512 cfg=v3/configs/csip_debias.py data.res_schedule=[[0.5,512]]
+csip_p2/dft_r640_tag001 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.01
+csip_p2/dft_yspread cfg=v3/configs/csip_debias.py data.spread_key=year
+csip_p2/dft_gray15 cfg=v3/configs/csip_debias.py data.aug={'zoom':(0.8,1.25),'p_gray':0.15}
+csip_p2/dft_r640 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24
+csip_p2/dft_zoom05 cfg=v3/configs/csip_debias.py data.aug={'zoom':(0.5,1.25)}
+# r640 + tag 去偏 = 当前最优 (native 0.880 / 0.895): 再看 λ=0.03 与 2 倍预算
+csip_p2/dft_r640_tag003 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.03
+csip_p2/dft_r640_tag001_x2 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.01 optim.total_samples=1200000 eval.every_samples=400000
+# 10-22 04:19 起 GPU 7 上有用户进程 (约 55G), 640 关 patch drop 时 OOM (dft_r640_tag003 失败): 改为全程不关 drop 重跑, 附同设置的 tag001 对照
+# (06:42 GPU 7 已释放, 改回原配方重跑 dft_r640_tag003) csip_p2/dft_r640_tag003_ndo cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.03 model.patch_drop_off_frac=0.0
+# (06:42 GPU 7 已释放, 改回原配方重跑 dft_r640_tag003) csip_p2/dft_r640_tag001_ndo cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.01 model.patch_drop_off_frac=0.0
+csip_p2/q_blk00_07 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 model.finetune=blocks model.blocks=[0,1,2,3,4,5,6,7] optim.layer_decay=1.0
+csip_p2/q_blk08_15 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 model.finetune=blocks model.blocks=[8,9,10,11,12,13,14,15] optim.layer_decay=1.0
+csip_p2/q_blk16_23 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 model.finetune=blocks model.blocks=[16,17,18,19,20,21,22,23] optim.layer_decay=1.0
+csip_p2/q_old_recipe cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 model.num_queries=1 loss.siglip_gather=False model.matryoshka=(768,) optim.lp_samples=0 data.cross_frac=0.0 data.avoid_key=None
+csip_p2/q_ld100 cfg=v3/configs/csip_p2_base.py model.head=query model.pool=query model.num_queries=16 loss.arc_weight=0 optim.layer_decay=1.0
+
+ccip_p1/old_recipe model.num_queries=1 loss.arc_weight=0 loss.siglip_gather=False model.matryoshka=(768,) optim.lp_samples=0 data.alpha=1.0 data.group_frac=0.0
+
+# CCIP v3 teacher 定稿 (2026-10-22): l8b + batchneg + 无 LP + 伪画师交叉 0.25, 3M, 384 训练 / 512 评测
+final/ccip_teacher_v1 cfg=v3/configs/ccip_final.py
+# 10-22 条件去偏 (混淆目标 = 该画师的留一概念分布, 只擦画师内部的内容差异); 目标 I_c ≤ 0.091, I_char ≤ 0.036 (HF v2.1)
+csip_p2/dft_c_tag01 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.conditional=True debias.tag_weight=0.1
+csip_p2/dft_c_char01 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.conditional=True debias.char_weight=0.1
+# (取消: dft_c_char01 在 200k 时 t100 0.661, 条件角色擦除 λ=0.1 也伤画师信息, 16:49 杀掉) csip_p2/dft_c_both01 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.conditional=True debias.tag_weight=0.1 debias.char_weight=0.1
+# 长训 (4× 预算 2.4M): 配方待上面结果定, 先按 both01 占位
+# (取消: 条件角色擦除同样伤画师信息) csip_p2/dft_c_both01_x4 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.conditional=True debias.tag_weight=0.1 debias.char_weight=0.1 optim.total_samples=2400000 eval.every_samples=600000
+# 长训 4× 预算: 当前最优配方 r640 + 全局 tag 0.01 (x2 已 +0.006/+0.015); 角色偏置改走事后线性擦除
+csip_p2/dft_r640_tag001_x4 cfg=v3/configs/csip_debias.py data.res=640 model.grad_ckpt=24 debias.tag_weight=0.01 optim.total_samples=2400000 eval.every_samples=600000

@@ -1,0 +1,32 @@
+# CCIP P1 消融 (C′: 全部短预算微调, 每个只改一个维度; 基线见 ccip_p1_base.py)
+base
+# 微调方式
+ft_last12 model.finetune=last_n model.n_last=12
+ft_lora model.finetune=lora optim.lr_backbone=2e-4 optim.layer_decay=1.0
+# 损失
+loss_siglip_only loss.arc_weight=0
+loss_arc_only loss.siglip_weight=0
+# 池化
+pool_cls model.pool=cls
+pool_cls_mean model.pool=cls_mean
+# LP-FT
+no_lp optim.lp_samples=0
+# 采样
+samp_alpha1 data.alpha=1.0
+samp_nogroup data.group_frac=0.0
+# 对照组: 旧配方 (单 query 注意力池化 + 单卡 SigLIP + 自然采样) + 新骨干
+old_recipe model.num_queries=1 loss.arc_weight=0 loss.siglip_gather=False model.matryoshka=(768,) optim.lp_samples=0 data.alpha=1.0 data.group_frac=0.0
+# 学习率 / LLRD
+ld075 optim.layer_decay=0.75
+ld095 optim.layer_decay=0.95
+lr4e-5 optim.lr_backbone=4e-5 optim.lr_head=4e-4
+ft_last6 model.finetune=last_n model.n_last=6
+res256 data.res=256
+# 噪声估计: base 原样重跑 (series 索引 17:29 原地更新; base/ft_last12 用的是旧版, ft_lora 起是新版) + 换种子
+base_rerun
+base_seed1 seed=1
+# Surgical FT: 统一学习率 (ΔW 在 LLRD 下被学习率支配, 看不出层偏好), 只训某一段 block
+ld100 optim.layer_decay=1.0
+blk00_07 model.finetune=blocks model.blocks=[0,1,2,3,4,5,6,7] optim.layer_decay=1.0
+blk08_15 model.finetune=blocks model.blocks=[8,9,10,11,12,13,14,15] optim.layer_decay=1.0
+blk16_23 model.finetune=blocks model.blocks=[16,17,18,19,20,21,22,23] optim.layer_decay=1.0
