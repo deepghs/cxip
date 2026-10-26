@@ -620,3 +620,9 @@ dft_char1 在 200k 时训练内 t100 已降到 0.40，提前停掉。
   - `{ccip,csip}_clustering.png`: 随机 8 类 × 6 张, UMAP + HDBSCAN(min_cluster_size=2)。CCIP 8 类全对 (ARI 1.0); CSIP 6 类全对, 2 个画师并成一簇 (ARI 0.852), 照实展示。
 - 已上传 hub (仍为 private), 8 个文件 sha256 一致。上传前 README 备份 `_analysis/README_{ccip,csip}_before_showcase.md`。展示图含画师作品, 不放进 GitHub (公开仓库)。
 - (2026-10-26 补) 画师 x 角色对照图拆成每个模型一张 (`fig_grid_single` → `ccip_grid.png` / `csip_grid.png`), 应用户要求加简单标注, 方便普通用户看懂: "Reference" 标签、浅蓝底带 = 真实同类 (CCIP 同一列 / CSIP 同一行)、蓝框 = 超过默认阈值、分数后 ✓/✗、底部两行图例。hub 上旧的合并版 `showcase_grid.png` 已删除 (本地备份 `_analysis/grid_split_preview/showcase_grid_combined_old.png`), README 说明同步改写。
+
+### huggingface.co 副本与 demo Space (2026-10-26)
+
+- 模型: `deepghs-cv/AnimeCCIP-v3`, `deepghs-cv/AnimeCSIP-v3` (private), 与 hub.deepghs.org 发布版相同 (sha256 全部一致, CCIP 23 / CSIP 26 个文件)。README 改动: 去掉 `HF_ENDPOINT`、repo id 改为 deepghs-cv、去掉 `base_model` (HF 上没有 deepghs/AnimeDINOv3-timm)、加 Space 链接。脚本 `v3/scripts/publish_hf_cv.py {check,models,readme,spaces,test}`, token 用 env.sh 的 `HFCO_TOKEN`。
+- Demo: `7eu7d7/AnimeCCIP-v3`, `7eu7d7/AnimeCSIP-v3` (private, ZeroGPU)。app 源码 `v3/release_space/app.py` (两个 Space 共用, 用 Space 变量 `MODEL_REPO` 选模型; Space secret `HF_TOKEN` 读私有模型)。功能: 两图对比 (分数 / 判定 / 近似概率, CSIP 注明校准随来源变化) 和参考图排序 (按对参考图的平均 logit)。示例图为画师 x 角色对照的 9 张 (匿名)。线上验证: 结果与本地一致 (bf16 误差内), 首次调用约 2-5 s。
+- 为什么放个人账号: huggingface.co 2026-07 起, 组织新建 Gradio/Docker Space (含免费 cpu-basic 和 ZeroGPU) 需要 Team/Enterprise (deepghs-cv 与 deepghs 都实测 402), 旧 Space 保留运行; 免费个人账号可有 2 个 ZeroGPU Gradio Space。备选: 自有 GPU + Cloudflare Tunnel、魔搭创空间 xGPU、Modal。
