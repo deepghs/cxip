@@ -610,3 +610,12 @@ dft_char1 在 200k 时训练内 t100 已降到 0.40，提前停掉。
 - 已上传 hub (仍为 private), 27 个文件 sha256 与本地一致。上传前的 README 备份在 `_analysis/README_{ccip,csip}_before_details.md`。
 - 雷达图改为每轴独立范围 (`radar(..., per_axis=True)`): 外圈 = 1.0, 每轴下端 lo = 最差 − 0.5 (1 − 最差), 最差旧版落在 1/3 半径, 相同径向距离 = 相同相对错误率降幅。旧的共用刻度版本保留在 `_analysis/radar_shared_scale/`。已上传 hub。
 - 聚类图由 24 类 UMAP 改为 t-SNE (`v3/scripts/release_tsne.py` → `_analysis/tsne_v1.npz`; CCIP 200 角色 7,325 张, CSIP 全部 100 画师 5,966 张, 24 类着色其余灰色)。原因: 24 个随机类时 15-NN 同类率 98.6–99.0%, kNN 图近乎断开 (CCIP 6 块), UMAP 把每类压成占画面 0.5–1% 的小团并随意推远, 画面稀疏且新旧无差别。新图中 CSIP v2.1 的散落点明显多于 v3。旧 UMAP 图移到 `_analysis/umap_check/`, hub 上已删除并换成 `*_tsne.png`。
+
+### README 二次元效果展示 (2026-10-26)
+
+- 选例: `v3/scripts/release_showcase_mine.py {pairs,grid,gridfeat,cluster}` → `cxip_v3/release/_analysis/showcase_v1/` (候选 json + 接触表); 人工审阅后的选择在 `showcase_v1/picks.json`。所有图均过 `imgutils.validate.anime_rating` = safe, CSIP 另限 Danbooru rating g; 画师完全匿名 (Artist A/B/C), 不附出处。
+- 作图: `v3/scripts/plot_release_showcase.py` → README 新增 "Examples" 一节 (放在 Usage 之后):
+  - `showcase_grid.png` (两个 repo 都放): 3 角色 × 3 画师, 同一参考图, 分数来自发布的 HF 模型, 蓝框 = 超过 config.threshold。CCIP 亮一列, CSIP 亮一行; CSIP 有一个误报 (Artist C 的 Koishi −0.31 > −0.582) 照实保留并在说明里写明。
+  - `{ccip,csip}_hard_pairs.png`: 新旧模型判断不同的难例 (各自 best-F1 阈值), 最后一行是 v3 判错的例子 (CCIP: 换身体的角色、双胞胎, 新旧都错; CSIP: 铅笔草稿各版本都错, 以及 v2.1 对而 v3 错的相似画风)。
+  - `{ccip,csip}_clustering.png`: 随机 8 类 × 6 张, UMAP + HDBSCAN(min_cluster_size=2)。CCIP 8 类全对 (ARI 1.0); CSIP 6 类全对, 2 个画师并成一簇 (ARI 0.852), 照实展示。
+- 已上传 hub (仍为 private), 8 个文件 sha256 一致。上传前 README 备份 `_analysis/README_{ccip,csip}_before_showcase.md`。展示图含画师作品, 不放进 GitHub (公开仓库)。
