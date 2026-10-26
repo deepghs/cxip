@@ -619,3 +619,4 @@ dft_char1 在 200k 时训练内 t100 已降到 0.40，提前停掉。
   - `{ccip,csip}_hard_pairs.png`: 新旧模型判断不同的难例 (各自 best-F1 阈值), 最后一行是 v3 判错的例子 (CCIP: 换身体的角色、双胞胎, 新旧都错; CSIP: 铅笔草稿各版本都错, 以及 v2.1 对而 v3 错的相似画风)。
   - `{ccip,csip}_clustering.png`: 随机 8 类 × 6 张, UMAP + HDBSCAN(min_cluster_size=2)。CCIP 8 类全对 (ARI 1.0); CSIP 6 类全对, 2 个画师并成一簇 (ARI 0.852), 照实展示。
 - 已上传 hub (仍为 private), 8 个文件 sha256 一致。上传前 README 备份 `_analysis/README_{ccip,csip}_before_showcase.md`。展示图含画师作品, 不放进 GitHub (公开仓库)。
+- (2026-10-26 补) 画师 x 角色对照图拆成每个模型一张 (`fig_grid_single` → `ccip_grid.png` / `csip_grid.png`), 应用户要求加简单标注, 方便普通用户看懂: "Reference" 标签、浅蓝底带 = 真实同类 (CCIP 同一列 / CSIP 同一行)、蓝框 = 超过默认阈值、分数后 ✓/✗、底部两行图例。hub 上旧的合并版 `showcase_grid.png` 已删除 (本地备份 `_analysis/grid_split_preview/showcase_grid_combined_old.png`), README 说明同步改写。

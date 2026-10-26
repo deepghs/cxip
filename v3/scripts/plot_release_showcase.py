@@ -1,7 +1,7 @@
 """README 二次元图效果展示 (选例见 release_showcase_mine.py 与人工审阅后的 showcase_v1/picks.json)。
 
-showcase_grid.png            画师 x 角色 3x3 对照: 同一参考图, CCIP 高分落在同一列 (同角色), CSIP 落在同一行 (同画师)
-                             (两个 README 都放; 分数来自发布的 HF 模型, 边框 = 超过 config.threshold)
+{ccip,csip}_grid.png         画师 x 角色 3x3 对照, 每个模型一张: 同一参考图, CCIP 高分落在同一列 (同角色), CSIP 落在同一行 (同画师)
+                             (分数来自发布的 HF 模型; 图中有简单标注: 浅蓝底带 = 真实同类, 蓝框 = 超过 config.threshold, ✓/✗ + 图例)
 {ccip,csip}_hard_pairs.png   难例对: 旧版 (最新一版) 与 v3 的 logit 和对错 (各自 best-F1 阈值), 最后一行为 v3 仍判错的例子
 {ccip,csip}_clustering.png   UMAP + HDBSCAN 自动分组: 每行一个预测簇, 角上色点 = 真实类别
 画师完全匿名 (图中只有 Artist A/B/C), 不附出处。
@@ -53,36 +53,76 @@ def show(fig, rect, im, edge=GRID, lw=0.8):
 
 
 # ------------------------------------------------------------------------------------------------ A
-def fig_grid(path):
+def fig_grid_single(repo, path):
+    """单模型 3x3: 浅蓝底带 = 真实同类 (CCIP 同一列 / CSIP 同一行), 蓝框 = 分数超过 config.threshold, ✓/✗ = 判断对错。"""
     g = J('grid.json')
     _, read = load_set('test100_0918')
     ims = dict(zip(g['keys'], load_thumbs(read, g['idx'])))
     chars, arts = g['chars'], g['artists']
-    W, H = 11.2, 5.75
+    logit, thr = dict(zip(g['keys'], g[repo]['logits'])), g[repo]['threshold']
+    ccip = repo.startswith('AnimeCCIP')
+    a_ch, a_art = g['anchor'].split('|')
+    same = (lambda ch, a: ch == a_ch) if ccip else (lambda ch, a: a == a_art)
+    cell, gap, sgap = 1.4, 0.14, 0.5
+    left, top = 1.0, 1.05
+    gw = 3 * cell + 2 * gap
+    W = left + gw + 1.25
+    H = top + 3 * (cell + sgap) + (0.45 if ccip else 0.05) + 0.85
     fig = plt.figure(figsize=(W, H))
-    cell, gap = 1.25, 0.1                   # 英寸
-    for p, repo in enumerate(['AnimeCCIP-v3', 'AnimeCSIP-v3']):
-        logit = dict(zip(g['keys'], g[repo]['logits']))
-        thr = g[repo]['threshold']
-        x0 = 1.0 + p * 5.4
-        fig.text((x0 + 1.5 * (cell + gap)) / W, (H - 0.3) / H, repo, ha='center', fontsize=12, fontweight='bold', color=INK)
+    X = lambda c: left + c * (cell + gap)
+    Y = lambda r: H - top - r * (cell + sgap) - cell
+    fig.text((left + gw / 2) / W, (H - 0.35) / H, repo, ha='center', fontsize=13, fontweight='bold', color=INK)
+    band = dict(color='#e3eefb', transform=fig.transFigure, zorder=-1, lw=0)
+    pad = 0.08
+    if ccip:
+        c = chars.index(a_ch)
+        bx, by = X(c) - pad, Y(2) - sgap - 0.4
+        fig.add_artist(plt.Rectangle((bx / W, by / H), (cell + 2 * pad) / W, (H - top + 0.32 - by) / H, **band))
+        fig.text((X(c) + cell / 2) / W, (by + 0.2) / H, 'Same character', ha='center', va='center', fontsize=9.5,
+                 color=BLUE, fontweight='bold')
+    else:
+        r = arts.index(int(a_art) if isinstance(arts[0], int) else a_art)
+        by = Y(r) - sgap + 0.06
+        fig.add_artist(plt.Rectangle(((left - 0.95) / W, by / H), (gw + 2.1) / W, (cell + sgap + pad - 0.06) / H, **band))
+        fig.text((left + gw + 0.62) / W, (Y(r) + cell / 2) / H, 'Same\nartist', ha='center', va='center', fontsize=9.5,
+                 color=BLUE, fontweight='bold', linespacing=1.3)
+    for c, ch in enumerate(chars):
+        fig.text((X(c) + cell / 2) / W, (H - top + 0.14) / H, CHAR_NAME[ch], ha='center', fontsize=9.5, color=INK2)
+    for r, a in enumerate(arts):
+        fig.text((left - 0.14) / W, (Y(r) + cell / 2) / H, f'Artist {"ABC"[r]}', ha='right', va='center', fontsize=9.5,
+                 color=INK2)
         for c, ch in enumerate(chars):
-            fig.text((x0 + c * (cell + gap) + cell / 2) / W, (H - 0.62) / H, CHAR_NAME[ch], ha='center', fontsize=9.5,
-                     color=INK2)
-        for r, a in enumerate(arts):
-            y = H - 0.75 - r * (cell + 0.42) - cell
-            fig.text((x0 - 0.12) / W, (y + cell / 2) / H, f'Artist {"ABC"[r]}', ha='right', va='center', fontsize=9.5,
-                     color=INK2)
-            for c, ch in enumerate(chars):
-                k = f'{ch}|{a}'
-                x = x0 + c * (cell + gap)
-                anchor = k == g['anchor']
-                hit = logit[k] > thr
-                show(fig, [x / W, y / H, cell / W, cell / H], ims[k],
-                     edge=INK if anchor else (BLUE if hit else GRID), lw=3.2 if anchor else (2.6 if hit else 0.8))
-                if not anchor:
-                    fig.text((x + cell / 2) / W, (y - 0.2) / H, f'{logit[k]:.2f}', ha='center', fontsize=9.5,
-                             color=INK if hit else MUTED, fontweight='bold' if hit else 'normal')
+            k, x, y = f'{ch}|{a}', X(c), Y(r)
+            anchor, hit = k == g['anchor'], logit[k] > thr
+            show(fig, [x / W, y / H, cell / W, cell / H], ims[k],
+                 edge=INK if anchor else (BLUE if hit else GRID), lw=3.2 if anchor else (2.6 if hit else 0.8))
+            ty = (y - 0.22) / H
+            if anchor:
+                fig.text((x + cell / 2) / W, ty, 'Reference', ha='center', va='center', fontsize=9.5, color=INK,
+                         fontweight='bold')
+                continue
+            ok = hit == same(ch, str(a))
+            fig.text((x + cell / 2 + 0.06) / W, ty, f'{logit[k]:.2f}', ha='right', va='center', fontsize=9.5,
+                     color=INK if hit else MUTED, fontweight='bold' if hit else 'normal')
+            fig.text((x + cell / 2 + 0.14) / W, ty, '✓' if ok else '✗', ha='left', va='center', fontsize=11,
+                     color=GOOD if ok else BAD, fontweight='bold', **SYM)
+    # 图例 (两行)
+    what = 'character' if ccip else 'artist'
+    rows = [[('ref', 'Reference image'), ('hit', f'Score > {thr:.3g}: predicted match')],
+            [('band', f'Same {what} as the reference'), ('mark', 'Prediction right / wrong')]]
+    for i, items in enumerate(rows):
+        ly = 0.62 - i * 0.36
+        for j, (kind, lab) in enumerate(items):
+            x = 0.3 + j * (W / 2 - 0.1)
+            if kind == 'band':
+                fig.add_artist(plt.Rectangle((x / W, (ly - 0.1) / H), 0.32 / W, 0.2 / H, **band))
+            elif kind == 'mark':
+                fig.text((x + 0.02) / W, ly / H, '✓', va='center', fontsize=11, color=GOOD, fontweight='bold', **SYM)
+                fig.text((x + 0.17) / W, ly / H, '✗', va='center', fontsize=11, color=BAD, fontweight='bold', **SYM)
+            else:
+                fig.add_artist(plt.Rectangle((x / W, (ly - 0.1) / H), 0.32 / W, 0.2 / H, transform=fig.transFigure,
+                                             fill=False, ec=INK if kind == 'ref' else BLUE, lw=2.2))
+            fig.text((x + 0.45) / W, ly / H, lab, va='center', fontsize=9, color=INK2)
     save(fig, path)
 
 
@@ -150,9 +190,8 @@ def fig_clusters(task, path):
 
 def main():
     style()
-    fig_grid(REL / 'AnimeCCIP-v3/assets/showcase_grid.png')
-    (REL / 'AnimeCSIP-v3/assets/showcase_grid.png').write_bytes((REL / 'AnimeCCIP-v3/assets/showcase_grid.png').read_bytes())
     for t, repo in (('ccip', 'AnimeCCIP-v3'), ('csip', 'AnimeCSIP-v3')):
+        fig_grid_single(repo, REL / f'{repo}/assets/{t}_grid.png')
         fig_pairs(t, REL / f'{repo}/assets/{t}_hard_pairs.png')
         fig_clusters(t, REL / f'{repo}/assets/{t}_clustering.png')
 
