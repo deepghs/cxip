@@ -23,6 +23,8 @@ MERGED = REPRO / 'data/ccip_merged_nd'
 EVAL_ROOT = Path('/data/neko/cxip_v3/eval')
 OPENSET = EVAL_ROOT / 'ccip_openset_v1'
 CROSSCHAR = EVAL_ROOT / 'csip_crosschar_v1'
+# index.parquet 形式的评测集 (path, label_name, label, sample_key); csip_unseen_v1 见 v3/scripts/build_csip_unseen.py
+INDEX_SETS = {'csip_unseen_v1': Path('/data/neko/cxip_v3/data/csip_unseen_v1')}
 ISEK_GLOB = '/data/.hf/hub/datasets--isek-ai--danbooru-tags-2024/snapshots/*/data/*.parquet'
 _A = 'data/danbooru-w640-ws-full-artist'
 LEGACY_SETS = {
@@ -108,6 +110,18 @@ def load_legacy(name):
     df = pd.DataFrame(items, columns=['path', 'label_name'])
     df['label'] = np.unique(df['label_name'].values, return_inverse=True)[1]
     df['sample_key'] = df['path'].map(lambda p: os.path.relpath(p, REPRO))
+
+    def read_image(i, decode=True):
+        row = df.iloc[i] if isinstance(i, (int, np.integer)) else i
+        with open(row['path'], 'rb') as f:
+            b = f.read()
+        return decode_image(b) if decode else b
+    return df, read_image
+
+
+def load_index_set(name):
+    """INDEX_SETS: 返回 (df[path, label_name, label, sample_key, ...], read_image)"""
+    df = pd.read_parquet(INDEX_SETS[name] / 'index.parquet').reset_index(drop=True)
 
     def read_image(i, decode=True):
         row = df.iloc[i] if isinstance(i, (int, np.integer)) else i

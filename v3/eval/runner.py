@@ -35,6 +35,8 @@ def load_set(name):
     """返回 (df, read_image), df 至少有 sample_key, label 两列"""
     if name in ('openset_full', 'openset_fast'):
         return evalsets.load_ccip_openset(name.split('_')[1])
+    if name in evalsets.INDEX_SETS:
+        return evalsets.load_index_set(name)
     return evalsets.load_legacy(name)
 
 
