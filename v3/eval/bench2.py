@@ -31,7 +31,8 @@ V4 = Path('/scratch/cxip_v4')
 BENCH = V4 / 'data/bench2_v1'
 V2_ARTISTS = V4 / 'data/danbooru-artist-v2-work/artists.parquet'     # artist, n_local, t_first, span, ...
 UPLOAD_SOURCE = 'danbooru_upload'                                     # 兜底日期 (不作年代真值)
-G2_SETS = ('bench2_b1', 'bench2_b2', 'bench2_b3p2', 'csip_eval_public')
+# G2 口径不含 B3-P2: 其 Pixiv 来源 (s1) 是 AI 图语料, 映射无效 (见 docs/csip_v4_p0_baseline_zh.md §6.1)
+G2_SETS = ('bench2_b1', 'bench2_b2', 'csip_eval_public')
 CROSS_SET = 'bench2_b3p1'
 REWEIGHT_SETS = ('bench2_b2', 'bench2_b3p2')
 RESERVED = ('diff', 'clustering', 'composition', 'inject', 'reweight', 'name', 'split')
@@ -400,11 +401,12 @@ def _fpr_bin(neg: np.ndarray, fpr: float) -> int | None:
     return int(ok[0]) if len(ok) else None
 
 
-def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 1e-3) -> dict:
+def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 1e-3, g2_sets=G2_SETS) -> dict:
     """sets: {集合名: {模型名: ArtistHists}} (可以是按画师求和后的单行版本); thresholds: {模型名: 默认阈值 (score)}.
     返回 {模型名: {per_set, drift (threshold_drift, 不含 B3-P1), max_cross_f1_loss (仅 G2 集合之间),
     fpr_transfer {'s->t': {fpr, recall, source_fpr (源集合在所选箱的实际 FPR)}}, fpr_transfer_nominal_fpr, b3p1_f1_loss}};
-    drift 里全部集合的最大损失改名为 max_cross_f1_loss_all_sets, 以免与 G2 口径的 max_cross_f1_loss 混淆"""
+    drift 里全部集合的最大损失改名为 max_cross_f1_loss_all_sets, 以免与 G2 口径的 max_cross_f1_loss 混淆;
+    g2_sets: G2 口径包含的集合 (默认 G2_SETS)"""
     thresholds = thresholds or {}
     models = []
     for hs in sets.values():
@@ -439,7 +441,7 @@ def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 
         res['drift'] = pairwise.threshold_drift(main) if len(main) >= 2 else None
         if res['drift'] and 'max_cross_f1_loss' in res['drift']:      # 全部集合 (含 legacy) 的最大值; G2 口径见下
             res['drift']['max_cross_f1_loss_all_sets'] = res['drift'].pop('max_cross_f1_loss')
-        g2 = [s for s in G2_SETS if s in curves]
+        g2 = [s for s in g2_sets if s in curves]
         loss = (res['drift'] or {}).get('cross_f1_loss', {})
         g2_loss = [v for k, v in loss.items() if k.split('->')[0] in g2 and k.split('->')[1] in g2]
         res['max_cross_f1_loss'] = float(max(g2_loss)) if g2_loss else None
@@ -493,10 +495,11 @@ def _legacy_hists(name: str, df: pd.DataFrame, models: list[ModelFeats]) -> dict
     return out
 
 
-def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2_b2', 'bench2_b3p1', 'bench2_b3p2'),
+def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2_b2'),
         legacy=('test100_0918', 'csip_eval_public', 'csip_unseen_v1'), n_boot: int = 1000, seed: int = 0,
-        inject_dir=BENCH / 'inject', log=print, dfs: dict | None = None) -> dict:
-    """dfs: 可选的已读取集合 {集合名: df} (CLI 读特征时已经读过); 缺的集合用 load_set 读"""
+        inject_dir=BENCH / 'inject', log=print, dfs: dict | None = None, g2_sets=G2_SETS) -> dict:
+    """dfs: 可选的已读取集合 {集合名: df} (CLI 读特征时已经读过); 缺的集合用 load_set 读;
+    g2_sets: 传给 threshold_transfer 的 G2 口径集合"""
     dfs = dfs or {}
 
     def get(s):
@@ -536,5 +539,5 @@ def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2
             continue
         df = get(name)
         hists[name] = _legacy_hists(name, df, models)
-    out['threshold_transfer'] = threshold_transfer(hists, {m.name: m.threshold for m in models})
+    out['threshold_transfer'] = threshold_transfer(hists, {m.name: m.threshold for m in models}, g2_sets=g2_sets)
     return out

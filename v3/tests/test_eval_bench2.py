@@ -223,3 +223,46 @@ def test_na_date_source_is_unreliable(tmp_path):
     r = B2.evaluate_set('s', df, [B2.ModelFeats('a', {'s': f})], 'test', n_boot=5, inject_dir=tmp_path)
     c = r['composition']
     assert c['n_date_reliable'] == 128 and c['date_source'] == {'twitter': 128, 'NA': 32}
+
+
+# ---------------------------------------------------------------- final-review fix: G2 excludes B3-P2
+def test_g2_sets_exclude_b3p2_by_default_and_are_overridable():
+    assert 'bench2_b3p2' not in B2.G2_SETS and 'bench2_b3p1' not in B2.G2_SETS
+    hs = {}
+    for i, s in enumerate(('bench2_b1', 'bench2_b2', 'bench2_b3p2', 'csip_eval_public')):
+        df, f = _sep_set(seed=i)
+        hs[s] = B2._legacy_hists(s, df, [B2.ModelFeats('a', {s: f + 0.4 * i}, 10.0, -5.0, 0.3)])
+    a = B2.threshold_transfer(hs, {'a': 0.3})['a']
+    loss = a['drift']['cross_f1_loss']
+    assert a['max_cross_f1_loss_sets'] == ['bench2_b1', 'bench2_b2', 'csip_eval_public']
+    g2 = [v for k, v in loss.items() if 'bench2_b3p2' not in k]
+    assert a['max_cross_f1_loss'] == max(g2)
+    w = B2.threshold_transfer(hs, {'a': 0.3}, g2_sets=B2.G2_SETS + ('bench2_b3p2',))['a']
+    assert 'bench2_b3p2' in w['max_cross_f1_loss_sets'] and w['max_cross_f1_loss'] == max(loss.values())
+
+
+def test_cli_default_sets_skip_b3_and_pass_g2_sets(tmp_path, monkeypatch):
+    import json
+    from v3.scripts import bench2_eval
+    assert bench2_eval.SETS == ('bench2_b1', 'bench2_b2')
+    df, f = _sep_set()
+    df2, f2 = _sep_set(seed=1)
+    data = {'bench2_b1': df, 'bench2_b2': df2, 'csip_eval_public': df2[['sample_key', 'label']]}
+    loads = []
+    monkeypatch.setattr(B2, 'load_set', lambda name: loads.append(name) or (data[name], None))
+    monkeypatch.setattr(B2, 'reference_population', lambda: (np.full(10, 9.0), np.full(10, 2011.0)))
+    (tmp_path / 'a').mkdir()
+    for s, x, d in (('bench2_b1', f, df), ('bench2_b2', f2, df2), ('csip_eval_public', f2, df2)):
+        np.savez(tmp_path / 'a' / f'{s}.npz', feats=x.astype(np.float16), sample_key=d.sample_key.values.astype(str))
+    base = ['--model', 'a', str(tmp_path / 'a'), '10', '-5', '0.3', '--split', 'test', '--n-boot', '5',
+            '--legacy', 'csip_eval_public']
+    bench2_eval.main(base + ['--out', str(tmp_path / 'r.json')])
+    res = json.loads((tmp_path / 'r.json').read_text())
+    assert set(res['sets']) == {'bench2_b1', 'bench2_b2'} and res['skipped'] == {}
+    assert sorted(set(loads)) == ['bench2_b1', 'bench2_b2', 'csip_eval_public']       # B3 never read by default
+    assert res['threshold_transfer']['a']['max_cross_f1_loss_sets'] == ['bench2_b1', 'bench2_b2', 'csip_eval_public']
+    bench2_eval.main(base + ['--g2-sets', 'bench2_b1', 'bench2_b2', '--out', str(tmp_path / 'g.json')])
+    t = json.loads((tmp_path / 'g.json').read_text())['threshold_transfer']['a']
+    assert t['max_cross_f1_loss_sets'] == ['bench2_b1', 'bench2_b2']
+    assert t['max_cross_f1_loss'] == max(t['drift']['cross_f1_loss'][k]
+                                         for k in ('bench2_b1->bench2_b2', 'bench2_b2->bench2_b1'))

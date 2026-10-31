@@ -27,3 +27,22 @@ def test_transfer_table_ignores_excluded_sets():
     md = transfer_table(res, ['a', 'b'])
     assert '| 最大跨集 F1 损失 (test; a, b) | 0.070 (b->a) |' in md
     assert '| 默认阈值 F1 / best F1，a | 0.680 / 0.700 (FPR 0.0008) |' in md and 'bad' not in md
+
+
+def test_regate_g2_drops_b3p2_and_b3_sets():
+    from v3.scripts import bench2_tables as BT
+    cl = {'bench2_b1->bench2_b2': 0.05, 'bench2_b2->bench2_b1': 0.02, 'bench2_b1->bench2_b3p2': 0.5,
+          'bench2_b3p2->bench2_b1': 0.4, 'csip_eval_public->bench2_b1': 0.07, 'bench2_b1->csip_eval_public': 0.01,
+          'bench2_b1->test100_0918': 0.9}
+    per = {s: {'best_f1': 0.8, 'default': dict(f1=0.7, fpr=1e-3)}
+           for s in ('bench2_b1', 'bench2_b2', 'bench2_b3p2', 'csip_eval_public', 'test100_0918')}
+    res = dict(models=['a'], split='test', sets={'bench2_b1': {}, 'bench2_b3p1': {}, 'bench2_b3p2': {}},
+               threshold_transfer={'a': dict(max_cross_f1_loss=0.5, b3p1_f1_loss=0.6, per_set=per,
+                                             drift=dict(cross_f1_loss=cl))})
+    r = BT.regate_g2(res)
+    t = r['threshold_transfer']['a']
+    assert t['max_cross_f1_loss'] == 0.07 and t['max_cross_f1_loss_pair'] == 'csip_eval_public->bench2_b1'
+    assert t['max_cross_f1_loss_sets'] == ['bench2_b1', 'bench2_b2', 'csip_eval_public']
+    assert t['b3p1_f1_loss'] is None and set(r['sets']) == {'bench2_b1'}
+    assert res['threshold_transfer']['a']['max_cross_f1_loss'] == 0.5           # input untouched
+    assert BT.regate_g2(res, ['bench2_b1', 'bench2_b3p2'])['threshold_transfer']['a']['max_cross_f1_loss'] == 0.5

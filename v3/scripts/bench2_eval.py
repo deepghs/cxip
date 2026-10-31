@@ -2,7 +2,7 @@
 
 用法:
   python -m v3.scripts.bench2_eval --model REF FEATS_DIR SCALE BIAS THR [--model NAME FEATS_DIR SCALE BIAS THR ...] \
-      [--split dev|test] [--n-boot 1000] --out res.json [--md res.md]
+      [--split dev|test] [--n-boot 1000] [--sets bench2_b1 bench2_b2] [--g2-sets ...] --out res.json [--md res.md]
 第一个 --model 是参照模型 (diff 列 = 其他模型 - 参照). 某集合缺特征文件 (FEATS_DIR/<集合>.npz) 时该集合跳过并注明.
 markdown: 每个 B 集合一张表, 行 = 主指标, 列 = 各模型 (point [lo, hi]) + 每个非参照模型的 diff 列;
 最后一张表是运行级的阈值迁移指标 (max_cross_f1_loss 等, 只有点估计).
@@ -20,7 +20,8 @@ from v3.eval import bench2
 MAIN = ('pr_auc/<1y', 'pr_auc/1-3y', 'pr_auc/>=6y', 'map_at_r/1y', 'ap/<1y', 'date_mae', 'inject_auroc/bad_date',
         'same_char_fpr')
 RUN_LEVEL = ('max_cross_f1_loss', 'b3p1_f1_loss')
-SETS = ('bench2_b1', 'bench2_b2', 'bench2_b3p1', 'bench2_b3p2')
+# 默认只跑 B1 / B2: B3 (bench2_b3p1 / bench2_b3p2) 的 Pixiv 来源无效 (报告 §6.1), 仍可用 --sets 显式指定
+SETS = ('bench2_b1', 'bench2_b2')
 LEGACY = ('test100_0918', 'csip_eval_public', 'csip_unseen_v1')
 
 
@@ -91,6 +92,8 @@ def main(argv=None):
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--sets', nargs='+', default=list(SETS))
     ap.add_argument('--legacy', nargs='*', default=list(LEGACY))
+    ap.add_argument('--g2-sets', nargs='+', default=list(bench2.G2_SETS),
+                    help='G2 口径 (max_cross_f1_loss) 包含的集合')
     ap.add_argument('--out', required=True)
     ap.add_argument('--md')
     a = ap.parse_args(argv)
@@ -108,7 +111,7 @@ def main(argv=None):
             print(f'[bench2_eval] {name}: no features for {miss}')
         models.append(bench2.ModelFeats(name, feats, float(scale), float(bias), float(thr)))
     res = bench2.run(models, split=a.split, sets=tuple(a.sets), legacy=tuple(a.legacy), n_boot=a.n_boot, seed=a.seed,
-                     dfs=dfs)
+                     dfs=dfs, g2_sets=tuple(a.g2_sets))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1, default=_json_default))
     md = markdown(res)
