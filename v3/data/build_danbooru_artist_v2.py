@@ -4,17 +4,28 @@ Reads the 2026 Danbooru snapshot, keeps single-artist / not deleted / jpg|png|we
 image, keeps one post per (artist, work family), corrects the date to the earliest plausible original-publication
 date (twitter snowflake / pixiv index), maps 2024 (v1) artist tags to their current names by majority of shared post
 ids, and flags the evaluation artists. Output: WORK/{posts.parquet, artists.parquet, prepare_stats.json}.
+Then resizes the images (short side <= 640, webp q95) into one part tar per source shard and packs the
+``cxip-danbooru-artist/v2`` neko-data dataset (single split ``all``, artists contiguous, labels = name-sorted
+artists, stream order = artists shuffled with ``seed``, ids ascending within an artist).
 
     python -m v3.data.build_danbooru_artist_v2 prepare
+    python -m v3.data.build_danbooru_artist_v2 jobs                    # WORK/jobs.parquet (src_tar, member, key)
+    python -m v3.data.build_danbooru_artist_v2 resize --workers 160    # WORK/resized/*.tar + *.parquet (resumable)
+    python -m v3.data.build_danbooru_artist_v2 build                   # neko-data build (resumable)
+    python -m v3.data.build_danbooru_artist_v2 verify
+    python -m v3.data.build_index danbooru_v2                          # OUT/index/{all,train_ge30,train_ge10}.parquet
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import os
+import random
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +43,12 @@ V1_PLAN = Path('/data/neko/cxip_v3/data/danbooru-artist-v1-work/plan.parquet')
 KAL_CLASSES = '/data/neko/ext_models/kaloscope3_preview/hf/v1-artist-classifier/class_mapping.csv'
 UNSEEN_V1 = Path('/data/neko/cxip_v3/data/csip_unseen_v1/index.parquet')
 WORK = V4 / 'data/danbooru-artist-v2-work'
+OUT = V4 / 'data/danbooru-artist-v2'
+RESIZED = WORK / 'resized'
+DS_DIRS = {0: 'danbooru-full-4mpixel-v1', 1: 'danbooru-newest-4mpixel-v1'}
+DATASET_ID = 'cxip-danbooru-artist'
+VERSION = 'v2'
+SPLIT = 'all'
 MIN_LOCAL = 10
 AI_TAGS = {'ai-generated', 'ai-assisted'}
 EXTS = ['jpg', 'jpeg', 'png', 'webp']
@@ -202,8 +219,267 @@ def prepare():
     print(json.dumps(stats, indent=1), flush=True)
 
 
+# ---------------------------------------------------------------------------------------------
+# resize jobs -> parts -> plan -> neko-data build
+# ---------------------------------------------------------------------------------------------
+
+PLAN_COLS = ['id', 'artist', 'family', 'date', 'date_source', 't_year', 'date_day', 'upload_day', 'characters',
+             'copyrights', 'general', 'medium', 'rating', 'orig_width', 'orig_height', 'n_artist_local'] + FLAGS
+
+
+def src_tar(ds: int, shard: int) -> str:
+    return str(SHARDS / DS_DIRS[int(ds)] / 'wds/train' / f'train-{int(shard):06d}.tar')
+
+
+def make_jobs(posts: pd.DataFrame) -> pd.DataFrame:
+    """(src_tar, member, key) per post: member ``{id}.webp`` in its local shard, output key ``{id}``."""
+    j = pd.DataFrame({'src_tar': [src_tar(d, s) for d, s in zip(posts.ds, posts.shard)],
+                      'member': posts.id.astype(str) + '.webp', 'key': posts.id.astype(str),
+                      'id': posts.id.astype('int64')})
+    return j.sort_values(['src_tar', 'id']).reset_index(drop=True)
+
+
+def make_plan(posts: pd.DataFrame, parts: pd.DataFrame, seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Join posts with the resized parts. Labels = index in the name-sorted list of ALL artists in ``posts``;
+    stream order = artists shuffled (``seed``), ids ascending within an artist. Posts whose resize failed go to the
+    returned error table; every post must have a parts row."""
+    artists = sorted(posts.artist.unique().tolist())
+    label_of = {a: i for i, a in enumerate(artists)}
+    order = list(artists)
+    random.Random(f'{seed}-{SPLIT}').shuffle(order)
+    rank = {a: i for i, a in enumerate(order)}
+    pp = parts[['key', 'part', 'offset', 'size', 'width', 'height', 'error']]
+    assert not pp.key.duplicated().any(), 'duplicate keys in parts'
+    m = posts.assign(key=posts.id.astype(str)).merge(pp, on='key', how='left', indicator=True)
+    assert (m._merge == 'both').all(), f'{int((m._merge != "both").sum())} posts have no resize result'
+    m['label'] = m.artist.map(label_of).astype('int64')
+    bad = m.error.notna()
+    errors = m.loc[bad, ['id', 'artist', 'part', 'error']].sort_values('id').reset_index(drop=True)
+    plan = m[~bad].assign(_rank=lambda d: d.artist.map(rank)).sort_values(['_rank', 'id'])
+    plan = plan.drop(columns=['_rank', '_merge', 'key', 'error']).reset_index(drop=True)
+    for c in ['offset', 'size', 'width', 'height']:
+        plan[c] = plan[c].astype('int64')
+    return plan, errors
+
+
+def jobs():
+    p = WORK / 'jobs.parquet'
+    if p.exists():
+        print(f'{p} exists ({len(pd.read_parquet(p, columns=["key"]))} rows); keeping it', flush=True)
+        return
+    j = make_jobs(pd.read_parquet(WORK / 'posts.parquet', columns=['id', 'ds', 'shard']))
+    missing = [t for t in j.src_tar.unique() if not os.path.exists(t)]
+    assert not missing, f'{len(missing)} source tars missing, e.g. {missing[:3]}'
+    tmp = p.with_name(p.name + '.tmp')
+    j.to_parquet(tmp, index=False)
+    os.replace(tmp, p)
+    print(f'jobs: {len(j)} images in {j.src_tar.nunique()} source tars -> {p}', flush=True)
+
+
+def resize(workers: int = 160, limit_tars: int = 0):
+    from v3.data.resize_parts import run_jobs
+    j = pd.read_parquet(WORK / 'jobs.parquet')
+    if limit_tars:
+        keep = sorted(j.src_tar.unique())[:limit_tars]
+        j = j[j.src_tar.isin(keep)]
+    t0 = time.time()
+    parts = run_jobs(j, RESIZED, workers)
+    n_err = int(parts.error.notna().sum())
+    print(f'resize done: {parts.part.nunique()} parts, {len(parts)} rows, errors {n_err} '
+          f'({n_err / max(len(parts), 1):.4%}), {time.time() - t0:.0f}s', flush=True)
+    if n_err:
+        print(parts[parts.error.notna()].error.str.slice(0, 60).value_counts().head(10).to_string(), flush=True)
+
+
+def load_parts(j: pd.DataFrame) -> pd.DataFrame:
+    from v3.data.resize_parts import part_name
+    names = [part_name(t) for t in sorted(j.src_tar.unique())]
+    todo = [n for n in names if not ((RESIZED / n).exists() and (RESIZED / n).with_suffix('.parquet').exists())]
+    if todo:
+        sys.exit(f'{len(todo)} resize parts not finished (e.g. {todo[:3]}); run `resize` first')
+    with ThreadPoolExecutor(32) as ex:
+        dfs = list(ex.map(lambda n: pd.read_parquet((RESIZED / n).with_suffix('.parquet')).assign(part=n), names))
+    return pd.concat(dfs, ignore_index=True)
+
+
+def _completed_samples(out: Path) -> int:
+    journal = out / 'reports' / f'build-journal-{SPLIT}.jsonl'
+    if not journal.exists():
+        return 0
+    return sum(json.loads(l)['num_samples'] for l in journal.read_text().splitlines() if l.strip())
+
+
+def _pread(part: str, offset: int, size: int, root: Path | None = None) -> bytes:
+    fd = os.open((root or RESIZED) / part, os.O_RDONLY)
+    try:
+        return os.pread(fd, size, offset)
+    finally:
+        os.close(fd)
+
+
+def _md(r: dict) -> dict:
+    md = {'label': int(r['label']), 'artist': r['artist'], 'danbooru_id': int(r['id']), 'family': int(r['family']),
+          'date': pd.Timestamp(r['date']).isoformat(), 'date_source': r['date_source'], 't_year': float(r['t_year']),
+          'date_day': int(r['date_day']), 'upload_day': int(r['upload_day']),
+          'characters': [str(x) for x in r['characters']], 'copyrights': [str(x) for x in r['copyrights']],
+          'general': r['general'], 'medium': r['medium'], 'rating': r['rating'],
+          'orig_width': None if pd.isna(r['orig_width']) else int(r['orig_width']),
+          'orig_height': None if pd.isna(r['orig_height']) else int(r['orig_height']),
+          'n_artist_local': int(r['n_artist_local'])}
+    md.update({c: bool(r[c]) for c in FLAGS})
+    return md
+
+
+def iter_samples(plan: pd.DataFrame, out: Path, threads: int = 32, window: int = 4096):
+    """Ordered NormalizedSample stream; part preads run in a thread pool with a bounded window. On resume the first
+    ``completed`` samples (already in the build journal) are yielded as cheap placeholders that neko-data skips."""
+    from neko_data.contract.records import NormalizedSample
+    completed = _completed_samples(Path(out))
+    print(f'stream: {len(plan)} samples, {completed} already in journal', flush=True)
+    for _ in range(completed):
+        yield None
+    rows = plan.iloc[completed:].to_dict('records')
+
+    def sample(r, data):
+        return NormalizedSample(sample_key=str(r['id']), image=data, image_extension='webp', split=SPLIT,
+                                source_id='danbooru2026-4mpixel-w640', caption=r['artist'], metadata=_md(r),
+                                width=int(r['width']), height=int(r['height']))
+
+    t0, n = time.time(), 0
+    with ThreadPoolExecutor(threads) as ex:
+        it = iter(rows)
+        futures = []
+        for r in it:
+            futures.append((r, ex.submit(_pread, r['part'], r['offset'], r['size'])))
+            if len(futures) >= window:
+                break
+        head = 0
+        while head < len(futures):
+            r, fut = futures[head]
+            futures[head] = None
+            head += 1
+            nxt = next(it, None)
+            if nxt is not None:
+                futures.append((nxt, ex.submit(_pread, nxt['part'], nxt['offset'], nxt['size'])))
+            yield sample(r, fut.result())
+            n += 1
+            if n % 100_000 == 0:
+                el = time.time() - t0
+                print(f'{completed + n}/{len(plan)} {n / el:.0f} img/s elapsed {el / 60:.1f} min', flush=True)
+            if head > 65536:
+                futures = futures[head:]
+                head = 0
+
+
+def _write_parquet(df: pd.DataFrame, path: Path):
+    tmp = path.with_name(path.name + '.tmp')
+    df.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
+
+
+def build(max_shard_size: str = '1GiB', seed: int = 0, threads: int = 32, out: Path | None = None):
+    from neko_data.build.job import BuildJob, build_dataset
+    out = out or OUT
+    if (out / 'manifest.json').exists():
+        sys.exit(f'{out} already has manifest.json; bump the version instead of overwriting')
+    plan_path = WORK / 'plan.parquet'
+    posts = pd.read_parquet(WORK / 'posts.parquet', columns=PLAN_COLS)
+    if plan_path.exists():
+        plan = pd.read_parquet(plan_path)
+        print(f'plan exists: {len(plan)} samples (resume)', flush=True)
+    else:
+        parts = load_parts(pd.read_parquet(WORK / 'jobs.parquet', columns=['src_tar']))
+        plan, errors = make_plan(posts, parts, seed)
+        errors.to_csv(WORK / 'resize_errors.csv', index=False)
+        _write_parquet(plan, plan_path)
+        print(f'plan: {len(plan)} samples, {plan.label.nunique()} artists; resize errors skipped {len(errors)} '
+              f'-> resize_errors.csv', flush=True)
+    out.mkdir(parents=True, exist_ok=True)
+    artists = sorted(posts.artist.unique().tolist())
+    if not (out / 'classes.json').exists():
+        n = plan.groupby('label').size()
+        fl = posts.groupby('artist')[FLAGS].first()
+        nl = posts.groupby('artist').n_artist_local.first()
+        classes = [{'label': i, 'name': a, 'n': int(n.get(i, 0)), 'n_artist_local': int(nl[a]),
+                    **{c: bool(fl.loc[a, c]) for c in FLAGS}} for i, a in enumerate(artists)]
+        (out / 'classes.json').write_text(json.dumps(classes, ensure_ascii=False) + '\n', encoding='utf-8')
+    del posts
+    meta = {
+        'task': 'csip', 'num_classes': len(artists), 'label_key': 'label', 'group_key': 'label',
+        'classes_file': 'classes.json', 'seed': seed,
+        'source': 'nyanko-devs/danbooru2026 posts snapshot + local danbooru-{full,newest}-4mpixel-v1 shards; '
+                  'single-artist non-AI posts, one per work family, >= 10 local posts per artist (+ all eval-flagged '
+                  'artists); images resized to short side <= 640 (BICUBIC, never upscaled), webp q95, alpha kept',
+        'split_columns': FLAGS,
+        'date': 'earliest plausible original-publication date (twitter snowflake / pixiv index / upload), ISO UTC',
+    }
+    m = build_dataset(BuildJob(
+        source=iter_samples(plan, out=out, threads=threads), output_dir=out, dataset_id=DATASET_ID, version=VERSION,
+        split=SPLIT, max_shard_size=max_shard_size, group_key='label', resume=True, skip_invalid_samples=False,
+        metadata=meta,
+    ))
+    print('done', m.metadata.get('split_stats'), flush=True)
+
+
+def verify(out: Path | None = None, n_check: int = 2000):
+    """Manifest vs files, sample count vs successfully resized plan rows, order, artist contiguity, and
+    byte-exact comparison of ``n_check`` random samples against the resized parts."""
+    from v3.data.resize_parts import iter_tar_members
+    out = out or OUT
+    m = json.load(open(out / 'manifest.json'))
+    shards = [s for s in m['shards'] if s['split'] == SPLIT]
+    plan = pd.read_parquet(WORK / 'plan.parquet', columns=['id', 'label', 'part', 'offset', 'size'])
+    parts = load_parts(pd.read_parquet(WORK / 'jobs.parquet', columns=['src_tar']))
+    n_ok = int(parts.error.isna().sum())
+    total = sum(s['num_samples'] for s in shards)
+    print(f'{len(shards)} shards, {total} samples (plan {len(plan)}, resized OK {n_ok}, resize errors '
+          f'{len(parts) - n_ok}), {sum(s["size_bytes"] for s in shards) / 2**30:.1f} GiB', flush=True)
+    assert total == len(plan) == n_ok, 'sample count mismatch'
+    for s in shards:
+        assert (out / s['path']).stat().st_size == s['size_bytes'], s['path']
+    meta = pd.concat([pd.read_parquet(out / s['metadata_path'], columns=['sample_key', 'label', 'shard_path'])
+                      for s in shards], ignore_index=True)
+    assert meta.sample_key.astype('int64').tolist() == plan.id.tolist(), 'order mismatch vs plan'
+    assert (meta.label.to_numpy() == plan.label.to_numpy()).all(), 'label mismatch vs plan'
+    runs = int(meta.label.ne(meta.label.shift()).sum())
+    per_label = meta.groupby('label').shard_path.nunique()
+    print(f'labels {meta.label.nunique()} (classes.json {len(json.load(open(out / "classes.json")))}), '
+          f'label runs {runs}, labels split across shards {(per_label > 1).sum()}', flush=True)
+    assert runs == meta.label.nunique(), 'artists not contiguous'
+    assert (per_label == 1).all(), 'artist split across shards'
+    rng = np.random.default_rng(0)
+    pick = np.sort(rng.choice(len(plan), size=min(n_check, len(plan)), replace=False))
+    sel = meta.iloc[pick].assign(part=plan.part.to_numpy()[pick], offset=plan.offset.to_numpy()[pick],
+                                 size=plan['size'].to_numpy()[pick])
+    by_name = {Path(s['path']).name: s['path'] for s in shards}
+    n = 0
+    for shard_path, g in sel.groupby('shard_path'):
+        path = by_name[Path(shard_path).name]
+        members = {name: (o, sz) for name, o, sz in iter_tar_members(out / path)}
+        for r in g.itertuples():
+            o, sz = members[f'{r.sample_key}.webp']
+            assert _pread(path, o, sz, out) == _pread(r.part, int(r.offset), int(r.size)), r.sample_key
+            n += 1
+    print(f'byte-exact checks OK ({n} samples)', flush=True)
+    print('VERIFY OK', flush=True)
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['prepare'])
-    args = ap.parse_args()
-    prepare()
+    ap.add_argument('cmd', choices=['prepare', 'jobs', 'resize', 'build', 'verify'])
+    ap.add_argument('--workers', type=int, default=160)
+    ap.add_argument('--limit-tars', type=int, default=0)
+    ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--threads', type=int, default=32)
+    ap.add_argument('--max-shard-size', default='1GiB')
+    a = ap.parse_args()
+    if a.cmd == 'prepare':
+        prepare()
+    elif a.cmd == 'jobs':
+        jobs()
+    elif a.cmd == 'resize':
+        resize(a.workers, a.limit_tars)
+    elif a.cmd == 'build':
+        build(a.max_shard_size, a.seed, a.threads)
+    else:
+        verify()

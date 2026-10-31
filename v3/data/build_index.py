@@ -15,6 +15,7 @@ per-shard parquet sidecars. Usage:
 
     python -m v3.data.build_index ccip       # ccip_merged_nd -> /data/neko/cxip_v3/data/ccip-merged-v1-index/index/
     python -m v3.data.build_index danbooru   # danbooru-artist-v1 -> <root>/index/all.parquet
+    python -m v3.data.build_index danbooru_v2   # danbooru-artist-v2 -> <root>/index/{all,train_ge30,train_ge10}.parquet
     python -m v3.data.build_index generic --root R --split S --out O
 """
 from __future__ import annotations
@@ -36,6 +37,9 @@ IMAGE_EXTS = {'jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tif', 'tiff'}
 CCIP_ROOT = Path('/data/neko/cxip_repro/data/ccip_merged_nd')
 CCIP_INDEX = Path('/data/neko/cxip_v3/data/ccip-merged-v1-index/index')
 DANBOORU_ROOT = Path('/data/neko/cxip_v3/data/danbooru-artist-v1')
+DANBOORU_V2_ROOT = Path('/scratch/cxip_v4/data/danbooru-artist-v2')
+BENCH2_SPLITS = Path('/scratch/cxip_v4/data/bench2_v1/splits.json')
+EVAL_FLAGS_V2 = ['eval_0918_test', 'eval_public', 'eval_unseen_v1']
 ISEK = '/data/.hf/hub/datasets--isek-ai--danbooru-tags-2024/snapshots/*/data/*.parquet'
 INDEX_COLS = ['sample_key', 'shard', 'offset', 'size', 'ext', 'label']
 # sidecar columns that duplicate index columns or are not useful for training
@@ -311,9 +315,40 @@ def build_danbooru(root: Path = DANBOORU_ROOT, workers: int = 32):
     print(json.dumps(stats, indent=2))
 
 
+def danbooru_v2_train(df: pd.DataFrame, exclude: set[str], min_n: int) -> pd.DataFrame:
+    """Training rows: artist not in the benchmark exclusion list and >= ``min_n`` local posts. Asserts the result is
+    disjoint from the exclusion list and holds no 0918-test / public / unseen-v1 evaluation artist."""
+    t = df[~df.artist.isin(exclude) & (df.n_artist_local >= min_n)]
+    assert not t.artist.isin(exclude).any(), 'train index intersects exclude_danbooru_artists'
+    leak = t[t[EVAL_FLAGS_V2].any(axis=1)]
+    assert leak.empty, f'{leak.artist.nunique()} evaluation-flagged artists would enter training'
+    return t
+
+
+def build_danbooru_v2(root: Path = DANBOORU_V2_ROOT, splits: Path = BENCH2_SPLITS, workers: int = 32):
+    out = root / 'index'
+    if (out / 'index_stats.json').exists():
+        raise SystemExit(f'{out} already built (index_stats.json exists); not overwriting')
+    exclude = set(json.load(open(splits))['exclude_danbooru_artists'])
+    df = build_split_index(root, 'all', list_cols=('characters', 'copyrights'), workers=workers)
+    df['danbooru_id'] = df['danbooru_id'].astype('int64')
+    write_parquet(df, out / 'all.parquet')
+    stats = {'all': {'samples': len(df), 'classes': int(df.label.nunique())},
+             'exclude_danbooru_artists': len(exclude),
+             'excluded_present': int(df.artist.isin(exclude).groupby(df.artist).first().sum())}
+    for name, min_n in [('train_ge30', 30), ('train_ge10', 10)]:
+        t = danbooru_v2_train(df, exclude, min_n)
+        write_parquet(t, out / f'{name}.parquet')
+        stats[name] = {'samples': len(t), 'classes': int(t.label.nunique()), 'min_n_artist_local': min_n}
+    stats['source_root'] = str(root)
+    stats['splits'] = str(splits)
+    (out / 'index_stats.json').write_text(json.dumps(stats, indent=2) + '\n')
+    print(json.dumps(stats, indent=2))
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['ccip', 'danbooru', 'generic'])
+    ap.add_argument('cmd', choices=['ccip', 'danbooru', 'danbooru_v2', 'generic'])
     ap.add_argument('--root', type=Path)
     ap.add_argument('--split')
     ap.add_argument('--out', type=Path)
@@ -323,5 +358,7 @@ if __name__ == '__main__':
         build_ccip(a.out or CCIP_INDEX, a.root or CCIP_ROOT, a.workers)
     elif a.cmd == 'danbooru':
         build_danbooru(a.root or DANBOORU_ROOT, a.workers)
+    elif a.cmd == 'danbooru_v2':
+        build_danbooru_v2(a.root or DANBOORU_V2_ROOT, workers=max(a.workers, 32))
     else:
         write_parquet(build_split_index(a.root, a.split, workers=a.workers), a.out)
