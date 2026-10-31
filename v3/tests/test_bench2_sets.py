@@ -115,19 +115,31 @@ def test_write_set_roundtrip_list_columns(tmp_path):
     assert list(back.columns[:len(B.COLUMNS)]) == B.COLUMNS
 
 
-def test_make_inject_near_writes_folders_and_own_manifest(tmp_path, monkeypatch):
+def _near_style_set(s, rng):
+    """6 artists x 20 images; image features = own direction e_a + small noise, except one decoy per artist: the
+    first image of artist (a + 1) % 6 points along e_a. So the nearest other-artist image to a's centroid is known."""
+    lab = np.repeat(np.arange(6), 20)
+    df = pd.DataFrame(dict(sample_key=[f'{s}{i}' for i in range(len(lab))], label=lab,
+                           split=np.where(lab < 3, 'dev', 'test'), t_year=rng.uniform(2010, 2020, len(lab))))
+    f = np.eye(16)[lab] + 0.05 * rng.normal(size=(len(lab), 16))
+    decoy = {}
+    for a in range(6):
+        row = 20 * ((a + 1) % 6)                                       # first image of the next artist
+        f[row] = np.eye(16)[a] + 0.01 * rng.normal(size=16)
+        decoy[a] = df['sample_key'][row]
+    return df, f, decoy
+
+
+def test_make_inject_near_picks_known_nearest_and_writes_own_manifest(tmp_path, monkeypatch):
     rng = np.random.default_rng(0)
     root = tmp_path / 'bench'
     (root / 'inject').mkdir(parents=True)
     (root / 'inject' / 'manifest.json').write_text('{}')          # existing inject manifest must be left alone
     fdir = tmp_path / 'feats'
     fdir.mkdir()
-    sets = {}
+    sets, decoys = {}, {}
     for s in B.INJECT_SETS:
-        lab = np.repeat(np.arange(6), 20)
-        df = pd.DataFrame(dict(sample_key=[f'{s}{i}' for i in range(len(lab))], label=lab,
-                               split=np.where(lab < 3, 'dev', 'test'), t_year=rng.uniform(2010, 2020, len(lab))))
-        f = rng.normal(size=(len(df), 8)) + 3 * np.eye(8)[lab]
+        df, f, decoys[s] = _near_style_set(s, rng)
         perm = rng.permutation(len(df))                               # npz rows in another order: aligned by key
         np.savez(fdir / f'bench2_{s}.npz', feats=f[perm].astype(np.float16),
                  sample_key=df['sample_key'].values[perm].astype(str))
@@ -140,8 +152,20 @@ def test_make_inject_near_writes_folders_and_own_manifest(tmp_path, monkeypatch)
         fo = pd.read_parquet(root / 'inject' / f'bench2_{s}_near_style.parquet')
         rec = man['files'][f'bench2_{s}_near_style.parquet']
         assert rec['folders'] == 6 and rec['injected'] == 6 == int(fo['injected'].sum())   # 20 * 5% = 1 per folder
-        lab_of = sets[f'bench2_{s}'].set_index('sample_key')['label']
-        inj = fo[fo['injected']]
-        assert (inj['sample_key'].map(lab_of) != inj['folder']).all()
+        inj = fo[fo['injected']].set_index('folder')['sample_key'].to_dict()
+        assert inj == decoys[s]                                       # positional misalignment would pick others
     with pytest.raises(SystemExit):
         B.make_inject_near(fdir, root=root)
+
+
+def test_make_inject_near_refuses_existing_output_before_loading(tmp_path, monkeypatch):
+    root = tmp_path / 'bench'
+    (root / 'inject').mkdir(parents=True)
+    (root / 'inject' / f'bench2_{B.INJECT_SETS[-1]}_near_style.parquet').write_bytes(b'x')
+
+    def boom(name):
+        raise AssertionError('features / sets must not be loaded when an output already exists')
+    monkeypatch.setattr(evalsets, 'load_index_set', boom)
+    with pytest.raises(FileExistsError):
+        B.make_inject_near(tmp_path / 'nofeats', root=root)
+    assert not (root / 'inject' / 'manifest_near_style.json').exists()

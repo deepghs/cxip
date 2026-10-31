@@ -316,6 +316,7 @@ def make_inject(root: Path = BENCH) -> dict:
     out_dir = root / 'inject'
     if (out_dir / 'manifest.json').exists():
         sys.exit(f'{out_dir} already has a manifest; bump the version instead of overwriting')
+    _check_free([out_dir / f'bench2_{s}_{kind}.parquet' for s in INJECT_SETS for kind in INJECT_KINDS])
     out_dir.mkdir(parents=True, exist_ok=True)
     man = dict(seed=SEED, frac=INJECT_FRAC, kinds=list(INJECT_KINDS), splits=list(REGULAR),
                note='folders over the dev + test rows of each set (sealed never used); near_style is made by '
@@ -331,6 +332,13 @@ def make_inject(root: Path = BENCH) -> dict:
     with open(out_dir / 'manifest.json', 'w') as f:
         json.dump(man, f, indent=1)
     return man
+
+
+def _check_free(paths) -> None:
+    """Refuse up front (before any features are loaded or folders built) if an output file already exists."""
+    taken = [str(p) for p in paths if Path(p).exists()]
+    if taken:
+        raise FileExistsError(f'output already exists: {taken}; bump the version instead of overwriting')
 
 
 def _write_folders(fo: pd.DataFrame, split_of: pd.Series, p: Path) -> dict:
@@ -360,6 +368,7 @@ def make_inject_near(feats_dir, root: Path = BENCH) -> dict:
     man_p = out_dir / 'manifest_near_style.json'
     if man_p.exists():
         sys.exit(f'{man_p} already exists; bump the version instead of overwriting')
+    _check_free([out_dir / f'bench2_{s}_near_style.parquet' for s in INJECT_SETS])
     out_dir.mkdir(parents=True, exist_ok=True)
     man = dict(seed=SEED, frac=INJECT_FRAC, kinds=['near_style'], splits=list(REGULAR), feats_dir=str(feats_dir),
                note='folders over the dev + test rows of each set (sealed never used); injected images mined with the '
