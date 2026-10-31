@@ -38,11 +38,17 @@ RESERVED = ('diff', 'clustering', 'composition', 'inject', 'reweight', 'name', '
 FPRS = (('1e-3', 'recall@fpr0.001'), ('1e-4', 'recall@fpr0.0001'))
 DATE_KW = dict(k=5, temp=10.0, min_candidates=10)
 _P_ALL = T.POS_GROUPS.index('all')
+_P_CROSS = T.POS_GROUPS.index('cross_content')
 _N_ALL = T.NEG_GROUPS.index('all')
+_N_CHAR = T.NEG_GROUPS.index('same_char')
+_N_COPY = T.NEG_GROUPS.index('same_copy')
+CONTENT_KEYS = ('cross_content_recall', 'same_char_fpr', 'same_copy_fpr')
 
 # metric 键 (每模型):
 #   pr_auc/<g>, recall@1e-3/<g>, recall@1e-4/<g>  g in timestrata.POS_GROUPS ('<1y','1-3y','3-6y','>=6y','all','cross_content')
-#   ap/<1y (= µAP), ap/all;  cross_content_recall, same_char_fpr, same_copy_fpr
+#   ap/<1y (= µAP), ap/all
+#   cross_content_recall, same_char_fpr, same_copy_fpr      默认阈值 (ModelFeats.threshold) 下, ruling R14
+#   cross_content_recall@best, same_char_fpr@best, same_copy_fpr@best   all 组最佳阈值下 (stratified_metrics)
 #   pr_auc/<g>/reweighted (仅传入 reweight 时)
 #   map_at_r/1y, r1/1y, map_at_r/any;  drift_spearman_median
 #   date_mae, date_hit1y, date_mae_content, date_mae_baseline, date_mae_upload_only;  inject_auroc/<kind>
@@ -87,19 +93,34 @@ def _strat_scalars(sm: dict, out: dict, suffix: str = '', full: bool = True) -> 
             out[k] = _f(sm[k])
 
 
+def _tail(x: np.ndarray, b: int) -> float:
+    tot = x.sum()
+    return float(x[b:].sum() / tot) if tot > 0 else float('nan')
+
+
 def _strat_draws(h: T.ArtistHists, W: np.ndarray, base: np.ndarray, suffix: str = '', full: bool = True,
-                 chunk_elems: int = 1 << 25):
+                 threshold: float | None = None, chunk_elems: int = 1 << 25):
     """point + 每次抽样的 stratified_metrics 标量. W: (n_boot, A) 重数; 抽样权重 = W * base.
-    每画师直方图只转一次 float64, 抽样按块做矩阵乘得到加权直方图, 再按单 "画师" 的 ArtistHists 调 stratified_metrics"""
+    每画师直方图只转一次 float64, 抽样按块做矩阵乘得到加权直方图, 再按单 "画师" 的 ArtistHists 调 stratified_metrics.
+    内容指标 (ruling R14): cross_content_recall / same_char_fpr / same_copy_fpr 取默认阈值 threshold (score 单位,
+    预测为正 = 所在箱及以上); stratified_metrics 在 all 组最佳阈值下的值改名为 '<键>@best'. threshold=None 时前者为 NaN."""
     A, GP, NB = h.pos.shape
     GN = h.neg.shape[1]
     Hp = h.pos.reshape(A, GP * NB).astype(np.float64)
     Hn = h.neg.reshape(A, GN * NB).astype(np.float64)
+    b0 = _bin_of(threshold, h.scale, h.bias) if threshold is not None else None
 
     def one(p, n):
         out = {}
         sm = T.stratified_metrics(T.ArtistHists(p.reshape(1, GP, NB), n.reshape(1, GN, NB), h.scale, h.bias))
         _strat_scalars(sm, out, suffix, full)
+        if full:
+            for k in CONTENT_KEYS:
+                out[f'{k}@best'] = out.pop(k)
+            pp, nn = p.reshape(GP, NB), n.reshape(GN, NB)
+            vals = ((pp[_P_CROSS], nn[_N_CHAR], nn[_N_COPY]) if b0 is not None else (None,) * 3)
+            for k, x in zip(CONTENT_KEYS, vals):
+                out[k] = _tail(x, b0) if x is not None else float('nan')
         return out
 
     point = one(base @ Hp, base @ Hn)
@@ -241,8 +262,12 @@ def evaluate_set(name: str, df: pd.DataFrame, models: list[ModelFeats], split: s
     t = d['t_year'].to_numpy(np.float64)
     fam = d['family'].to_numpy(np.int64)
     day = d['date_day'].to_numpy()
-    src = d['date_source'].astype(str).to_numpy() if 'date_source' in d.columns else np.full(n, '')
-    reliable = src != UPLOAD_SOURCE
+    if 'date_source' in d.columns:
+        src_s = d['date_source']
+        reliable = (src_s.notna() & (src_s != UPLOAD_SOURCE)).to_numpy()   # NA 来源不可靠, 不当真值
+        src = src_s.astype(object).where(src_s.notna(), 'NA').astype(str).to_numpy()
+    else:
+        reliable, src = np.zeros(n, bool), np.full(n, 'NA')
     if cross_source:
         rows = (d['source'] == 'pixiv').to_numpy()
         cols = (d['source'] == 'danbooru').to_numpy()
@@ -261,7 +286,8 @@ def evaluate_set(name: str, df: pd.DataFrame, models: list[ModelFeats], split: s
                 cross_source=bool(cross_source))
     res: dict = dict(name=name, split=split, composition=comp)
     if A == 0:
-        res['inject'] = {}
+        res.update({m.name: {} for m in models}, diff={f'{m.name}-vs-{models[0].name}': {} for m in models[1:]},
+                   inject={})
         return res
 
     W = bootstrap.draw_weights(A, n_boot, seed)                       # 所有模型共用
@@ -291,7 +317,7 @@ def evaluate_set(name: str, df: pd.DataFrame, models: list[ModelFeats], split: s
         if mi == 0:
             comp['n_pos_pairs'] = {g: int(h.pos[:, i].sum()) for i, g in enumerate(T.POS_GROUPS)}
             comp['n_neg_pairs'] = {g: int(h.neg[:, i].sum() // 2) for i, g in enumerate(T.NEG_GROUPS)}
-        p, x = _strat_draws(h, W, ones)
+        p, x = _strat_draws(h, W, ones, threshold=m.threshold)
         pt.update(p); dr.update(x)
         if base_rw is not None:
             p, x = _strat_draws(h, W, base_rw, suffix='/reweighted', full=False)
@@ -377,7 +403,8 @@ def _fpr_bin(neg: np.ndarray, fpr: float) -> int | None:
 def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 1e-3) -> dict:
     """sets: {集合名: {模型名: ArtistHists}} (可以是按画师求和后的单行版本); thresholds: {模型名: 默认阈值 (score)}.
     返回 {模型名: {per_set, drift (threshold_drift, 不含 B3-P1), max_cross_f1_loss (仅 G2 集合之间),
-    fpr_transfer {'s->t': {fpr, recall}}, b3p1_f1_loss}}"""
+    fpr_transfer {'s->t': {fpr, recall, source_fpr (源集合在所选箱的实际 FPR)}}, fpr_transfer_nominal_fpr, b3p1_f1_loss}};
+    drift 里全部集合的最大损失改名为 max_cross_f1_loss_all_sets, 以免与 G2 口径的 max_cross_f1_loss 混淆"""
     thresholds = thresholds or {}
     models = []
     for hs in sets.values():
@@ -400,6 +427,7 @@ def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 
             e = {k: cm[k] for k in ('pr_auc', 'ap', 'best_f1', 'best_threshold', 'n_pos_pairs', 'n_neg_pairs')}
             b = _fpr_bin(neg, fpr)
             e[f'threshold_at_fpr{fpr:g}'] = (float(h.scale * T._edge_cos(b) + h.bias) if b is not None else None)
+            e[f'actual_fpr_at_threshold_at_fpr{fpr:g}'] = float(neg[b:].sum() / neg.sum()) if b is not None else None
             thr = thresholds.get(m)
             if thr is not None:
                 at = pairwise.metrics_at_threshold(pairwise.PairHist(pos, neg, h.scale, h.bias), thr)
@@ -409,6 +437,8 @@ def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 
         res = dict(per_set=per)
         main = {s: c for s, c in curves.items() if s != CROSS_SET}
         res['drift'] = pairwise.threshold_drift(main) if len(main) >= 2 else None
+        if res['drift'] and 'max_cross_f1_loss' in res['drift']:      # 全部集合 (含 legacy) 的最大值; G2 口径见下
+            res['drift']['max_cross_f1_loss_all_sets'] = res['drift'].pop('max_cross_f1_loss')
         g2 = [s for s in G2_SETS if s in curves]
         loss = (res['drift'] or {}).get('cross_f1_loss', {})
         g2_loss = [v for k, v in loss.items() if k.split('->')[0] in g2 and k.split('->')[1] in g2]
@@ -419,13 +449,15 @@ def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 
             b = _fpr_bin(counts[s][1], fpr)
             if b is None:
                 continue
+            src_fpr = float(counts[s][1][b:].sum() / counts[s][1].sum())
             for t_ in counts:
                 if t_ == s:
                     continue
                 pos, neg = counts[t_]
-                tr[f'{s}->{t_}'] = dict(fpr=float(neg[b:].sum() / neg.sum()), recall=float(pos[b:].sum() / pos.sum()))
+                tr[f'{s}->{t_}'] = dict(fpr=float(neg[b:].sum() / neg.sum()), recall=float(pos[b:].sum() / pos.sum()),
+                                        source_fpr=src_fpr)
         res['fpr_transfer'] = tr
-        res['fpr_transfer_source_fpr'] = fpr
+        res['fpr_transfer_nominal_fpr'] = fpr       # 源集合阈值 = FPR <= 该值的最低箱; 实际源 FPR 见各项 source_fpr
         if 'bench2_b1' in curves and CROSS_SET in curves:
             d = pairwise.threshold_drift({'bench2_b1': curves['bench2_b1'], CROSS_SET: curves[CROSS_SET]})
             res['b3p1_f1_loss'] = d['cross_f1_loss'][f'bench2_b1->{CROSS_SET}']
@@ -463,7 +495,13 @@ def _legacy_hists(name: str, df: pd.DataFrame, models: list[ModelFeats]) -> dict
 
 def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2_b2', 'bench2_b3p1', 'bench2_b3p2'),
         legacy=('test100_0918', 'csip_eval_public', 'csip_unseen_v1'), n_boot: int = 1000, seed: int = 0,
-        inject_dir=BENCH / 'inject', log=print) -> dict:
+        inject_dir=BENCH / 'inject', log=print, dfs: dict | None = None) -> dict:
+    """dfs: 可选的已读取集合 {集合名: df} (CLI 读特征时已经读过); 缺的集合用 load_set 读"""
+    dfs = dfs or {}
+
+    def get(s):
+        return dfs[s] if s in dfs else load_set(s)[0]
+
     out = dict(split=split, n_boot=n_boot, seed=seed, models=[m.name for m in models], sets={}, skipped={})
     hists: dict = {}
     ref_pop = None
@@ -475,12 +513,12 @@ def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2
             log(f'[bench2] skip {name}: missing feats {miss}')
             continue
         if name == CROSS_SET:
-            parts = [load_set(s)[0] for s in need]
+            parts = [get(s) for s in need]
             df = pd.concat(parts, ignore_index=True)
             ms = [ModelFeats(m.name, {name: np.concatenate([np.asarray(m.feats[s]) for s in need])}, m.scale, m.bias,
                              m.threshold) for m in models]
         else:
-            df, ms = load_set(name)[0], models
+            df, ms = get(name), models
         rw = None
         if name in REWEIGHT_SETS:
             if ref_pop is None:
@@ -496,7 +534,7 @@ def run(models: list[ModelFeats], split: str = 'dev', sets=('bench2_b1', 'bench2
         if miss:
             out['skipped'][name] = f'missing feats {miss}'
             continue
-        df = load_set(name)[0]
+        df = get(name)
         hists[name] = _legacy_hists(name, df, models)
     out['threshold_transfer'] = threshold_transfer(hists, {m.name: m.threshold for m in models})
     return out

@@ -1,4 +1,4 @@
-import numpy as np, pandas as pd
+import numpy as np, pandas as pd, pytest
 from v3.eval import bench2 as B2
 
 def _set(n_art=12, per=10, seed=0):
@@ -14,18 +14,32 @@ def _set(n_art=12, per=10, seed=0):
 def test_evaluate_set_shapes_and_self_diff(tmp_path):
     df, f = _set()
     m = B2.ModelFeats('a', {'s': f}, 10.0, -5.0, 0.0)
-    r = B2.evaluate_set('s', df, [m, B2.ModelFeats('b', {'s': f}, 10.0, -5.0, 0.0)], 'dev', n_boot=50, inject_dir=tmp_path)
+    r = B2.evaluate_set('s', df, [m, B2.ModelFeats('b', {'s': f}, 10.0, -5.0, 0.0)], 'dev', n_boot=50, inject_dir=tmp_path,
+                        clustering_kw=dict(reduces=(None,)))          # fix round 1: skip UMAP (covered in test_eval_clustering)
     x = r['a']['pr_auc/<1y']
     assert x['lo'] <= x['point'] <= x['hi']
     assert r['diff']['b-vs-a']['pr_auc/all']['point'] == 0
     assert 'date_mae' in r['a'] and 'map_at_r/1y' in r['a']
     assert r['composition']['n_artists'] == 12
+    assert set(r['clustering']) == {'a', 'b'} and np.isfinite(r['clustering']['a']['none']['bcubed_f_mean'])
 
 def test_split_filter(tmp_path):
     df, f = _set()
     df.loc[df.label < 6, 'split'] = 'test'
-    r = B2.evaluate_set('s', df, [B2.ModelFeats('a', {'s': f}, 10.0, -5.0, 0.0)], 'dev', n_boot=10, inject_dir=tmp_path)
+    r = B2.evaluate_set('s', df, [B2.ModelFeats('a', {'s': f}, 10.0, -5.0, 0.0)], 'dev', n_boot=10, inject_dir=tmp_path,
+                        clustering_kw=dict(reduces=(None,)))
     assert r['composition']['n_artists'] == 6
+    # fix round 1: filtered-out rows (different features) must not matter; same as evaluating the pre-filtered set
+    out = (df.split == 'test').to_numpy()
+    f2 = f.copy()
+    f2[out] = np.random.default_rng(9).standard_normal((out.sum(), f.shape[1])) * 5
+    r2 = B2.evaluate_set('s', df, [B2.ModelFeats('a', {'s': f2}, 10.0, -5.0, 0.0)], 'dev', n_boot=10,
+                         inject_dir=tmp_path, clustering_kw=dict(reduces=(None,)))
+    r3 = B2.evaluate_set('s', df[~out].reset_index(drop=True), [B2.ModelFeats('a', {'s': f[~out]}, 10.0, -5.0, 0.0)],
+                         'dev', n_boot=10, inject_dir=tmp_path, clustering_kw=dict(reduces=(None,)))
+    pts = lambda x: {k: v['point'] for k, v in x['a'].items()}
+    assert pts(r) == pts(r2) == pts(r3)
+    assert r2['composition'] == r3['composition']
 
 
 # ---------------------------------------------------------------- additional coverage (beyond the brief's two tests)
@@ -113,6 +127,10 @@ def test_cross_source_pairs_and_threshold_transfer(tmp_path):
     assert a['max_cross_f1_loss'] == max(a['drift']['cross_f1_loss'][k] for k in ('bench2_b1->bench2_b2', 'bench2_b2->bench2_b1'))
     assert a['b3p1_f1_loss'] is not None and a['per_set']['bench2_b1']['default']['f1'] >= 0
     assert a['fpr_transfer']['bench2_b1->test100_0918']['fpr'] <= 1e-3
+    assert 'max_cross_f1_loss' not in a['drift'] and 'max_cross_f1_loss_all_sets' in a['drift']
+    assert a['fpr_transfer_nominal_fpr'] == 1e-3
+    src = a['fpr_transfer']['bench2_b1->bench2_b2']['source_fpr']
+    assert 0 <= src <= 1e-3 and src == a['per_set']['bench2_b1']['actual_fpr_at_threshold_at_fpr0.001']
     assert tt['b']['drift'] is not None and tt['b']['max_cross_f1_loss'] is None   # b has only one G2 set
 
 
@@ -146,7 +164,8 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     import json
     from v3.scripts import bench2_eval
     df, f = _sep_set()
-    monkeypatch.setattr(B2, 'load_set', lambda name: (df, None))
+    loads = []
+    monkeypatch.setattr(B2, 'load_set', lambda name: loads.append(name) or (df, None))
     for m in ('a', 'b'):
         (tmp_path / m).mkdir()
         np.savez(tmp_path / m / 'bench2_b1.npz', feats=f.astype(np.float16), sample_key=df.sample_key.values.astype(str))
@@ -157,5 +176,50 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     res = json.loads(out.read_text())
     assert res['models'] == ['a', 'b'] and set(res['sets']) == {'bench2_b1'} and 'bench2_b2' in res['skipped']
     assert res['sets']['bench2_b1']['diff']['b-vs-a']['pr_auc/<1y']['point'] == 0
+    assert loads == ['bench2_b1']                        # only sets with features, loaded once
     text = md.read_text()
     assert '| metric | a | b | b − a |' in text and '| date_mae |' in text
+
+
+# ---------------------------------------------------------------- fix round 1
+from v3.eval import timestrata as T
+
+
+def test_content_metrics_at_default_threshold(tmp_path):
+    """ruling R14: same_char_fpr / same_copy_fpr / cross_content_recall at ModelFeats.threshold; @best keeps the old ones"""
+    df, f = _sep_set()
+    df['copyrights'] = [[f'p{x}'] for x in np.random.default_rng(3).integers(0, 4, len(df))]
+    thr = -5.0 + 10.0 * 0.2                              # cos 0.2
+    ms = [B2.ModelFeats('a', {'s': f}, 10.0, -5.0, thr), B2.ModelFeats('b', {'s': f}, 10.0, -5.0, thr + 6.0)]
+    r = B2.evaluate_set('s', df, ms, 'test', n_boot=10, inject_dir=tmp_path)
+    h = T.artist_histograms(f, df.label.to_numpy() - 100, df.t_year.to_numpy(), df.family.to_numpy(),
+                            T.tag_ids(list(df.characters)), T.tag_ids(list(df.copyrights)), 10.0, -5.0)
+    b0 = int((0.2 + 1) / 2 * T.N_BINS)
+    for k, x in (('same_char_fpr', h.neg[:, 1]), ('same_copy_fpr', h.neg[:, 2]), ('cross_content_recall', h.pos[:, 5])):
+        x = x.sum(0)
+        assert x.sum() > 0
+        assert r['a'][k]['point'] == pytest.approx(x[b0:].sum() / x.sum(), abs=1e-12)
+        assert r['a'][f'{k}@best']['point'] is not None
+        assert r['a'][f'{k}@best'] == r['b'][f'{k}@best']    # best-threshold values do not depend on THR
+    assert 0 < r['a']['same_char_fpr']['point'] < 1
+    assert r['b']['same_char_fpr']['point'] < r['a']['same_char_fpr']['point']
+    assert r['diff']['b-vs-a']['same_char_fpr']['point'] < 0
+
+
+def test_empty_set_markdown(tmp_path):
+    from v3.scripts.bench2_eval import markdown
+    df, f = _sep_set()                                   # all rows are 'test'
+    ms = [B2.ModelFeats('a', {'s': f}), B2.ModelFeats('b', {'s': f})]
+    r = B2.evaluate_set('s', df, ms, 'dev', n_boot=5, inject_dir=tmp_path)
+    assert r['composition']['n_artists'] == 0 and r['diff'] == {'b-vs-a': {}} and r['a'] == {}
+    md = markdown(dict(models=['a', 'b'], split='dev', sets={'s': r}))
+    assert '| pr_auc/<1y | — | — | — |' in md
+
+
+def test_na_date_source_is_unreliable(tmp_path):
+    df, f = _sep_set()
+    df['date_source'] = df['date_source'].astype(object)
+    df.loc[df.index % 5 == 0, 'date_source'] = None
+    r = B2.evaluate_set('s', df, [B2.ModelFeats('a', {'s': f})], 'test', n_boot=5, inject_dir=tmp_path)
+    c = r['composition']
+    assert c['n_date_reliable'] == 128 and c['date_source'] == {'twitter': 128, 'NA': 32}
