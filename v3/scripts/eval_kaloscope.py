@@ -7,10 +7,11 @@
 检查点用 weights_only=True 加载 (只放行 RNG 状态里的 numpy 类型), 存出只含 model / model_config 的 model_only.pt。
 用法: CUDA_VISIBLE_DEVICES=5 python -m v3.scripts.eval_kaloscope [--sets test100_0918 csip_eval_public]
 然后对每份特征跑 v3.scripts.csip_full_eval (见 --print-cmds)。
+已存在的 npz 默认拒绝覆盖 (--overwrite 才覆盖), 符号链接目标一律拒绝; meta.json 内容相同不重写, 不同需要
+--overwrite (v3.eval.featio). 目标在加载模型之前全部检查; --out 可改输出目录 (默认 OUT).
 """
 import argparse
 import io
-import json
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
+from v3.eval import featio
 from v3.eval.runner import load_set
 
 EXT = Path('/data/neko/ext_models/kaloscope3_preview')
@@ -53,20 +55,27 @@ def load_model():
     return m.eval(), float(ck['model']['log_temperature'].exp()), float(ck['model']['bias'])
 
 
-def main():
+VARIANTS = ('backbone1536', 'proj256')
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--sets', nargs='+', default=['test100_0918', 'csip_eval_public'])
     ap.add_argument('--batch-size', type=int, default=128)
     ap.add_argument('--print-cmds', action='store_true')
-    args = ap.parse_args()
+    ap.add_argument('--out', type=Path, default=OUT)
+    ap.add_argument('--overwrite', action='store_true', help='覆盖已存在的 npz / 不同的 meta.json (符号链接仍拒绝)')
+    args = ap.parse_args(argv)
+    out = args.out
+    targets = {(v, name): out / v / 'feats' / f'{name}.npz' for name in args.sets for v in VARIANTS}
+    featio.preflight([] if args.print_cmds else targets.values(), out / 'meta.json', args.overwrite)   # 加载模型之前
     model, scale, bias = load_model()
     meta = dict(model='heathcliff01/Kaloscope3.0-preview@5e4bfa2', code='Chenkin-x/kaloscope-dinov3@95ade97',
                 scale=scale, bias=bias, preprocess='rgb_loader, Resize(512), CenterCrop(512), uint8')
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
+    featio.write_json(out / 'meta.json', meta, args.overwrite)      # 内容相同不重写
     if args.print_cmds:
         for v, (s, b) in (('proj256', (scale, bias)), ('backbone1536', (1.0, 0.0))):
-            print(f'python -m v3.scripts.csip_full_eval --name kaloscope3_{v} --feats-dir {OUT}/{v}/feats '
+            print(f'python -m v3.scripts.csip_full_eval --name kaloscope3_{v} --feats-dir {out}/{v}/feats '
                   f'--scale {s} --bias {b} --out /data/neko/cxip_v3/eval/csip_full/kaloscope3_{v}.json')
         return
     model = model.cuda()
@@ -84,9 +93,7 @@ def main():
         assert o.shape == (len(df), 1792) and torch.isfinite(o).all()
         print(name, 'proj norm (should be ~unnormalized)', o[:, 1536:].norm(dim=-1).mean().item())
         for v, f in (('backbone1536', o[:, :1536]), ('proj256', o[:, 1536:])):
-            d = OUT / v / 'feats'
-            d.mkdir(parents=True, exist_ok=True)
-            np.savez(d / f'{name}.npz', feats=f.numpy().astype(np.float16), sample_key=df['sample_key'].values.astype(str))
+            featio.save_feats(targets[(v, name)], f.numpy(), df['sample_key'].values, args.overwrite)
         print('saved', name, flush=True)
 
 
