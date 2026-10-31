@@ -149,7 +149,9 @@ def mixed_pool_clustering(feats, labels, n_pools=5, n_artists=100, max_per_artis
     n_distractors 张图作干扰 (真标签 -1, 即单例). 小集合时 n_artists 钳到 min(n_artists, A//2), 干扰从其余画师取.
     每个 reduce 模式 ('umap' / None=直接 HDBSCAN) 调 clustering_eval 扫 mcs, 用 nmi 选最佳 mcs, 报该 mcs 下
     bcubed_f / ari 在各池的均值与标准差 (np.std, ddof=0; 聚类不做 bootstrap, 用池间标准差表示波动).
-    nmi / ari 的选择与计算里, 干扰图各自编独立单例标签 (与 bcubed 对 -1 的处理一致).
+    与 bcubed 同一口径: 真标签与预测里的噪声 (-1) / 干扰图都当各自独立的单例. mcs 用 nmi_noise_singleton 选
+    (clustering_eval 的 select), 报告的 ari / nmi 都是该口径 (预测噪声单例化); 噪声整体当一个簇的 ARI 另给
+    ari_noise_as_class (nmi 同理 nmi_noise_as_class).
     返回 {mode_key: {...}, n_pools, n_artists, n_distractors, ...}; mode_key = 'umap' / 'none'.
     """
     labels = np.asarray(labels)
@@ -158,7 +160,9 @@ def mixed_pool_clustering(feats, labels, n_pools=5, n_artists=100, max_per_artis
     if na < 1:
         raise ValueError('need at least 2 artists')
     modes = {('none' if r is None else r): r for r in reduces}
-    acc = {k: dict(bcubed_f=[], ari=[], nmi=[], best_mcs=[], noise_frac=[]) for k in modes}
+    acc = {k: dict(bcubed_f=[], ari=[], ari_noise_as_class=[], nmi=[], nmi_noise_as_class=[], best_mcs=[], noise_frac=[])
+           for k in modes}
+    eval_kw = {'select': 'nmi_noise_singleton', **eval_kw}
     n_img, n_dis = [], []
     for pool in range(n_pools):
         rng = np.random.default_rng([seed, pool])
@@ -182,12 +186,16 @@ def mixed_pool_clustering(feats, labels, n_pools=5, n_artists=100, max_per_artis
                                     n_jobs=n_jobs, return_pred=True, **eval_kw)
             a = acc[key]
             a['bcubed_f'].append(bcubed(y_true, e['pred_labels'])['f'])
-            a['ari'].append(e['ari']); a['nmi'].append(e['nmi'])
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='The number of unique classes is greater')
+                a['ari'].append(float(adjusted_rand_score(y_eval, _singletonize(e['pred_labels']))))
+            a['ari_noise_as_class'].append(e['ari'])
+            a['nmi'].append(e['nmi_noise_singleton']); a['nmi_noise_as_class'].append(e['nmi'])
             a['best_mcs'].append(e['best_mcs']); a['noise_frac'].append(e['noise_frac'])
             a['reduce'] = e['reduce']
     out = dict(n_pools=int(n_pools), n_artists=na, n_distractors=int(min(n_dis)) if n_dis else 0,
                n_images=[int(x) for x in n_img], seed=seed)
     for key, a in acc.items():
-        out[key] = dict(a, **{f'{m}_{s}': float(fn(a[m])) for m in ('bcubed_f', 'ari', 'nmi')
+        out[key] = dict(a, **{f'{m}_{s}': float(fn(a[m])) for m in ('bcubed_f', 'ari', 'ari_noise_as_class', 'nmi', 'nmi_noise_as_class')
                               for s, fn in (('mean', np.mean), ('std', np.std))})
     return out

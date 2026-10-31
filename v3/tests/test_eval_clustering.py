@@ -124,3 +124,24 @@ def test_mixed_pool_clustering_deterministic_and_real_umap():
     b = cl.mixed_pool_clustering(f, l, **kw)
     assert a['umap']['bcubed_f'] == b['umap']['bcubed_f']
     assert a['umap']['reduce'] in ('umap', 'pca')
+
+
+def test_mixed_pool_clustering_perfect_with_noise_distractors(monkeypatch):
+    """artists clustered perfectly + every distractor predicted noise => ARI, NMI and BCubed F all 1 (singleton convention)"""
+    f, l = blobs(n_cls=8, per=8)
+    n_art_imgs = 4 * 8                    # pool layout: artist images first, then distractors
+
+    def perfect(X, mcs, n_jobs=32):
+        p = np.full(len(X), -1)
+        p[:n_art_imgs] = np.arange(n_art_imgs) // 8
+        return p
+
+    monkeypatch.setattr(cl, 'hdbscan_labels', perfect)
+    _pca_reduce(monkeypatch)
+    r = cl.mixed_pool_clustering(f, l, n_pools=2, n_artists=4, max_per_artist=8, n_distractors=12, seed=1,
+                                 mcs_range=range(2, 4))
+    for mode in ('umap', 'none'):
+        m = r[mode]
+        assert m['ari'] == [1.0, 1.0] and m['bcubed_f'] == [1.0, 1.0]
+        assert m['nmi_mean'] == pytest.approx(1.0)
+        assert m['ari_noise_as_class_mean'] < 0.9      # lumped convention penalises this ideal result
