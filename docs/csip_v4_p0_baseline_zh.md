@@ -5,15 +5,20 @@
 
 ## 0. 先看这里
 
-1. **Pixiv 部分的数据有根本性错误，B3-P1 / B3-P2 和 pixiv-artist-v1 目前不能用。**
-   - s1 图片 (`pixiv_ai_s1-webp-4Mpixel`) 的文件名 id 与 `pixiv_index` 的图片 id 不是同一套编号，所以 "图片 → 作品 → 账号" 的对应关系是错的。
-   - 结果是：Pixiv 图片的画师标签与图片内容基本无关 (证据见 §6.1)。
+1. **Pixiv 部分用错了数据源，B3-P1 / B3-P2 和 pixiv-artist-v1 不能用，也无法靠 "修正映射" 救回。**
+   - s1 (`pixiv_ai_s1-webp-4Mpixel`) 是一个 AI 生成图的语料库，不是人类画师作品。它的文件名 id 是上游存储库自己的编号，与 `pixiv_index` 的图片 id 无关。
+   - 所以 "图片 → 作品 → 账号" 的对应关系是错的，Pixiv 图片的画师标签与图片内容无关 (证据见 §6.1)。
    - 四个模型在 B3 上的同画师相似度都与随机持平，三个评测模型在 B3 上的 PR-AUC 都在随机水平 (约 0.001-0.007)。
-   - Danbooru 部分 (danbooru-artist-v2、B1、B2) 不受影响：其原发日期用的是按作品 id 查的 `artworks` 表，不经过 s1 图片 id。
+   - Danbooru 部分 (danbooru-artist-v2、B1、B2) 不受影响：其原发日期用的是按作品 id 查的 `artworks` 表，不经过 s1 图片。
    - 因此本报告的基线只在 B1 / B2 (和旧集合) 上下结论。B3 的数字列在 §6.1，仅作为缺陷的证据。
+   - 要用户选：(a) 另找真实的 Pixiv 图片来源 (例如按 `pixiv_index` 的图片 URL 重新下载)，或 (b) v4 不用 Pixiv，去掉 A7 和 B3 (§7)。
 2. **B1 / B2 基线：v3 x4 (未擦除) 在主指标层显著高于 v3 发布版。**
    - <1 年层 PR-AUC：x4 比发布版高 0.032 (B1 test) / 0.030 (B2 test)，dev 上为 0.030 / 0.019，95% CI 都不跨 0。
-   - 例外是 B2 dev 的 ≥6 年层：x4 与发布版持平。
+   - 例外都在 B2 dev，CI 跨 0：
+     - 3-6 年层 PR-AUC (+0.013)；
+     - ≥6 年层 PR-AUC (-0.002，重加权后 +0.002)；
+     - ≥6 年层 `recall@1e-3` (+0.015)。
+   - B1 dev / test 和 B2 test 上，x4 在全部时间层 (PR-AUC 和召回) 都显著高于发布版。
    - Kaloscope 在 B1 的 <1 年层与 v3 发布版持平 (test +0.002、dev +0.008，CI 跨 0)。
    - Kaloscope 在 B1 的 ≥6 年层、B2 的 <1 年和 1-3 年层都显著低于发布版。B1 的 1-3 年层只在 test 上显著 (-0.023)，dev 上不显著。
    - **年代估计和远期注入上 Kaloscope 最好 (B1)**：
@@ -48,7 +53,7 @@
 | pixiv (索引里的作品时间) | 1,262,671 | 17.4% |
 
 **pixiv-artist-v1**：947,863 张，28,783 类。训练部分 841,964 张、27,719 类，其中只在 Pixiv 的账号 171 个。
-**注意：由于 §6.1 的问题，这部分的标签不可信，P1 之前必须重建。**
+**注意：这部分的图片来自 AI 图语料库 s1，标签与图片无关 (§6.1)，不能用于训练。**
 
 ## 2. benchmark v2 集合构成
 
@@ -94,8 +99,8 @@
 - 年代指标只用原发日期可靠 (非上传时间) 的图作真值。
   - `date_mae_content` 排除共享角色 / 作品标签的近邻。这样候选不足 10 张的图更多，它和 `date_mae_baseline` 不是在同一批图上算的，不能直接相减。
   - `date_mae_upload_only` 是只有上传时间的图上的误差 (spec 要求单独报告)。
-- **B1 上 Kaloscope 的分数：Kaloscope 训练中见过这些画师 (spec §5.2)**，B1 上它与 v3 的对比不公平 (对 Kaloscope 有利)。v4 vs Kaloscope 的公平对比看 B2 (B3-P2 待修复)。
-- B2 另报 "总体重加权" (`/reweighted`)：按画师的职业跨度和首图年份，重加权到 danbooru-artist-v2 中 ≥30 张图的 56,391 个画师。参考分布未被覆盖的质量为 0.04%。
+- **B1 上 Kaloscope 的分数：Kaloscope 训练中见过这些画师 (spec §5.2)**，B1 上它与 v3 的对比不公平 (对 Kaloscope 有利)。v4 vs Kaloscope 的公平对比目前只能看 B2 (B3-P2 不可用，§6.1)。
+- B2 另报 "总体重加权" (`/reweighted`)：按画师的职业跨度和首图年份，重加权到 danbooru-artist-v2 中 ≥30 张图的 56,391 个画师。参考分布未被覆盖的质量：dev 0.12%，test 0.035%。
 
 ### 3.1 test
 
@@ -319,7 +324,7 @@ G4 目标：I_content ≤ 0.09、I_char ≤ 0.035。未擦除的 x4 两项都超
 
 ## 6. 与 spec 的偏离
 
-### 6.1 Pixiv 图片与元数据对不上 (阻断 B3 和 A7)
+### 6.1 Pixiv 部分用错了数据源 (阻断 B3 和 A7)
 
 **现象**：B3-P1、B3-P2 上三个模型的 PR-AUC 都在随机水平。四个模型的 "同画师平均 cos − 跨画师平均 cos" 都接近 0：
 
@@ -337,42 +342,83 @@ B3 test 上的 PR-AUC：
 | B3-P2 <1 年层 | 0.0068 | 0.0068 | 0.0064 |
 | B3-P2 1-3 年层 | 0.0036 | 0.0036 | 0.0037 |
 
-**根因**：
+**根因：s1 是 AI 生成图的语料库，不是 `pixiv_index` 所描述的那些人类作品。** 问题不只是连接时用错了 id，而是数据源本身选错了。下列检查一部分是我做的，一部分来自任务复核：
 
-1. 抽 80 个 "作品也在 Danbooru 上" 的 s1 第 1 页图片，与该作品 id 对应的 Danbooru 帖子图片比较 (16×16 灰度相关)。
+1. **来源**：s1 的数据集说明 (本地 HF 缓存里的 README) 标题为 "Pixiv AI-S1 4M Re-encoded Dataset"。
+   - 它是另一个存储库 (`pixiv_ai_s1_storage`) 的重编码，"图片最大 id 8,848,846"。
+   - s1 文件名的 id 是那个存储库自己的编号。
+2. **尺寸 (AI 生成图的典型特征)**：
+   - 复核抽 1,000 张 s1 图，没被缩到 4MP 的图 100% 宽高都能被 8 整除，89% 能被 64 整除，71% 正好是 SD 常用尺寸。
+   - `pixiv_index` 作品的对应比例只有 18% / 2.2% / 0.2-0.3%。
+   - 我另抽的 103 张未缩放 s1 图：被 8 整除 100%，被 64 整除 98%。
+3. **尺寸与元数据对不上**：
+   - 映射到的第 1 页图，宽高比与 `pixiv_index` 记录一致的只有 3.2% (500 行)，打乱配对后是 4.4%。
+   - 原尺寸或按 4MP 缩放后的尺寸，500 行中 0 行一致。
+4. **内容对不上**：我抽 80 个 "作品也在 Danbooru 上" 的 s1 第 1 页图，与该作品 id 对应的 Danbooru 帖子图比较 (16×16 灰度相关)。
    - 相关 > 0.9 的为 0/80；
-   - 按最近邻能找回对应图的为 2/80 (2.5%，随机水平 1.25%)；
-   - 目检的 4 对图内容完全不同。
-2. s1 数据集说明写明它是另一个存储库的重编码，"图片最大 id 8,848,846"，即 s1 文件名的 id 是该存储库自己的编号。
-   - `pixiv_index` 的图片 id 是 1 到约 1,505 万的连续整数，所以按 id 连接时 s1 的 3,048,551 张图 100% 都能 "连上"，看起来没有问题，实际对应关系是错的。
-   - `exist_ids.json` 只是 s1 自身的 id 集合，那次检查只证明了 id 集合相同，不能证明编号含义相同。
-3. 目检中多张 s1 图片看起来像 AI 生成 (数据集名为 `pixiv_ai_s1`)，未核实。
+   - 按最近邻能找回对应图的为 2/80 (随机水平 1/80)；
+   - 目检的 4 对图内容完全不同，s1 一侧像 AI 生成图。
+5. **`pixiv_index` 里没有 AI 作品**：`illust_ai_type` 只有 0 (未标注) 和 1 (非 AI)，从没有 2。
+6. **为什么之前的检查没发现**：
+   - `pixiv_index` 的图片 id 是 1 到约 1,505 万的连续整数，所以 s1 的 3,048,551 个 id 100% 都能连上；
+   - `exist_ids.json` 也只是 s1 自身的 id 集合；
+   - 元数据各表之间是自洽的，只有看图片内容和尺寸才能发现。
+
+**结论**：任何 "修正后的映射" 都不可能从 s1 得到 spec 需要的人类画师 Pixiv 作品，s1 不能作为 Pixiv 部分的图片来源。
 
 **影响范围**：
 
 | 范围 | 影响 |
 |-|-|
-| B3-P1 / B3-P2 (含 sealed) | 图片与标签无关，不能用 |
-| pixiv-artist-v1 | 标签与图片无关，不能进训练，消融 A7 暂停 |
-| spec §0.6 中由 s1 图片推出的统计 | 不可信。包括 "20% 的图所在作品在 Danbooru 上"、"只在 Pixiv 的账号 ≥30 作品 746 个"、B3-P1 的 "约 7 千个作品"，以及 B3-P2 账号池 |
-| 账号 ↔ Danbooru 画师映射 | 不受影响 (用 Danbooru 帖子的 pixiv_id 与 artworks.user_id) |
+| pixiv-artist-v1 (947,863 张) | 图片是 AI 图，标签与图片无关，不能用于训练；消融 A7 无数据 |
+| B3-P1 / B3-P2 (含 sealed) | 不能用 |
+| Task 5 中 B3 的划分构造 | 现状下没有意义：B3-P2 的账号池 (471 个) 和 B3-P1 的账号 (517 个) 都是按 "账号拥有的 s1 图" 选的 |
+| `pixiv_meta` 的 `works` 表 | 每行 s1 图对应的作品、账号、页码，以及由此得到的 `on_danbooru`，现状下都没有意义 |
+| `pixiv_meta` 的 `accounts` 表 | 账号集合、`n_works` / `n_images` / 跨度，以及 `pixiv_only` 标志，现状下都没有意义 (账号是按 s1 图选进来的) |
+| spec §0.6 中由 s1 推出的统计 | 没有意义，包括：3.05M 图 / 83 万作品 / 10.1 万账号的对应、"只有 23% 是第 1 页"、"20% 的图所在作品在 Danbooru 上"、"只在 Pixiv 的账号 ≥30 作品 746 个"、"24,567 个账号能对上画师"、"493 个 B1 画师约 7 千个作品" |
+| 账号 ↔ Danbooru 画师的映射规则本身 | 可以重用：它用 Danbooru 帖子的 pixiv_id 与 `pixiv_index` artworks 的 user_id，不经过 s1。但现有结果只覆盖拥有 s1 图的账号 |
 | danbooru-artist-v2 的 pixiv / pixiv_interp 日期 | 不受影响 (用 artworks 表的作品 id 与 created_at) |
-| B1 / B2 | 不受影响 |
+| B1 / B2、Danbooru 训练排除名单中的 Danbooru 部分 | 不受影响 |
 
-**建议** (需用户决定，§7)：
+**两个选项** (需用户决定，§7)：
 
-1. 找到 s1 存储库 id → Pixiv 作品 id / 页码的正确映射。
-   - 例如上游存储库可能带元数据表；
-   - 或按 sha256 / 文件名与 `pixiv_index.images.filename` 对齐。
-2. 映射修复后，验证 "s1 图与同作品 Danbooru 图一致"，再重建 pixiv-artist-v1 (v2) 和 B3 (bench2_v2)。
-   - 按约定升版本号，不覆盖现有目录。
-3. 在此之前：
-   - G2 用 B1 + B2 + csip_eval_public；
-   - 与 Kaloscope 的公平对比只看 B2。
+**(a) 另找真实的 Pixiv 图片来源。** 例如用 `pixiv_index` 的图片 URL 重新下载 (`images` 表 15,052,451 行都有 URL)，再按 spec §4.1 重建 pixiv-artist-v2 和 B3 (bench2_v2，升版本号)。
+
+粗略规模只按 `pixiv_index` 元数据估算，不经过 s1：
+- 账号 ↔ 画师映射在全索引上重算：47,195 个账号对上 46,784 个 Danbooru 画师；
+- 作品只计 Danbooru 上没有的；
+- "只在 Pixiv" 指账号没有任何作品在 Danbooru，且有 ≥30 个这样的作品。
+
+| 范围 | 账号 | 作品 | 图片 (全部页) | 每作品 ≤2 页 |
+|-|-|-|-|-|
+| 能对上 Danbooru 画师的账号 | 42,955 | 1,502,492 | 4,067,468 | 1,949,139 |
+| 只在 Pixiv 的账号 | 3,389 | 225,904 | 1,487,561 | 341,912 |
+| 其中 B1 画师的账号 (B3-P1 池，625 个画师) | 617 | 43,096 | 95,026 | 53,765 |
+
+- **按每作品 ≤2 页估算**：
+  - 约 229 万张；
+  - 缩到短边 640 webp 后约 270 GB (按 danbooru-artist-v2 的平均每张约 117 KB)；
+  - 下载原图约 3.4-6.9 TB (假设原图每页 1.5-3 MB，未实测)。可以边下边缩，不必全部落盘。
+  - 下载时间：按 20 张/秒约 32 小时。
+- **只取第 1 页**：约 173 万张，缩后约 200 GB。
+- **风险**：
+  - 需要 i.pximg.net 的 Referer、限速和服务条款；
+  - 已删除作品下载不到；
+  - `pixiv_index` 是爬取索引，每个账号的覆盖不完整；
+  - `illust_ai_type` = 0 的作品 (多为 2022-10 前) 无法排除未标注的 AI 图。
+  - 下载、校验 (与 Danbooru 同作品图比对) 和重建大约需要 2-3 天，含新的 B3 划分。
+
+**(b) v4 不用 Pixiv。** 去掉 A7 和 B3：
+- G2 用 B1 + B2 + csip_eval_public；
+- 与 Kaloscope 的公平对比只看 B2；
+- 跨来源阈值迁移只能靠 csip_eval_public 和旧集合。
+- 原发日期校正不受影响，因为它只用 `pixiv_index` 元数据。
+
+在用户决定前：G2 按 (b) 的口径报告 (§4)，P1 训练只用 Danbooru 数据。
 
 ### 6.2 其他偏离和说明
 
-- **B3-P1 很薄** (即使修复也需要用户判断)：每个 B1 画师的作品数中位数只有 6，512 个画师里 446 个不到 30 张 (dev 173、test 148、sealed 125)。
+- **B3-P1 很薄**：每个 B1 画师的作品数中位数只有 6，512 个画师里 446 个不到 30 张 (dev 173、test 148、sealed 125)。不过这些数字来自 s1 (§6.1)，本身没有意义。若选 (a)，`pixiv_index` 里 B1 画师的账号有约 4.3 万个 Danbooru 上没有的作品 (625 个画师)，B3-P1 会厚得多。
 - **B2 的日期类注入文件夹少**：`far_period` 68 个 (dev 31 / test 37)，`bad_date` 108 个 (dev 51 / test 57)。B2 画师职业跨度中位数约 3.4 年，满足 "跨度 ≥7 年 / ≥6 年" 的画师少，所以 B2 上这两项 CI 宽。
 - **注入图可能来自另一个 split 的画师** (裁定 R17)：`same_char` 与 `near_style` 的注入池都覆盖 dev + test。
   - 实测约一半注入图来自另一个 split 的画师：B1 near_style 50.4%、same_char 48.7%；B2 near_style 49.3%、same_char 48.5%。
@@ -390,16 +436,19 @@ B3 test 上的 PR-AUC：
 - **CSIP v2.1 的加载**：它没有 `get_image_features`。`extract_release_feats` 增加了旧版 HF CxIP 分支，与 `eval_hf_ccip` 相同：fp32 权重 + bf16 autocast，取 `out['features']`。
   - 与已有的 v2.1 特征逐图对比，cos ≥ 0.9998。
   - 模型从本地 HF 缓存离线加载，未用 token。
+  - v3 发布版改为先以 fp32 加载再转 bf16 (原来直接以 bf16 加载)。用 test100_0918 前 32 张图与旧的 `release_csip_v3` 特征对比，最小 cos 0.9999986，scale / bias 不变。
 - **Kaloscope 特征提取**：`eval_kaloscope` 原来只能按单图路径读，现在改为对打包 tar 的集合按偏移读字节 (预处理不变)。
 
 ## 7. 需要用户决定的事项
 
-1. **Pixiv 数据修复 (§6.1)**：是否先修复 s1 映射，再重建 pixiv-artist-v1 和 B3 (升版本号)？修复前：
-   - P1 训练只用 Danbooru 数据，A7 暂停；
-   - G2 用 B1 + B2 + csip_eval_public。
+1. **Pixiv 部分 (§6.1)**：s1 是 AI 图语料库，不能用。请在两个选项中选一个：
+   - **(a)** 另找真实 Pixiv 图片来源 (如按 `pixiv_index` URL 重新下载，约 229 万张、缩后约 270 GB)，然后重建 pixiv-artist-v2 和 bench2_v2 的 B3；
+   - **(b)** v4 不用 Pixiv，去掉 A7 和 B3。
+
+   决定前，P1 训练只用 Danbooru 数据，G2 用 B1 + B2 + csip_eval_public。
 2. **G2 口径**：是否以 bench2 口径 (§4) 为准、旧三集口径为辅？
 3. **same_char / near_style 是否按 split 分别重生成注入名单** (R17)：目前约一半注入图来自另一个 split 的画师。
-4. **B3-P1 的薄度能否接受** (修复后仍会是每画师中位数约 6 个作品)。
+4. **若选 (a)，B3 的规模**：每个 B1 画师 ≤40 个作品、B3-P2 300 个账号 (≥30 作品) 的设定是否保持。
 5. **是否删除已被替代的中间数据** (只列候选，未删)：
 
    | 路径 | 大小 |
@@ -408,8 +457,11 @@ B3 test 上的 PR-AUC：
    | `/scratch/cxip_v4/data/pixiv-artist-v1-pilot` | 184 MB |
    | `/scratch/cxip_v4/data/pixiv-artist-v1-pilot-work` | 179 MB |
    | `/scratch/cxip_v4/data/danbooru-artist-v2-work/resized` (danbooru-artist-v2 已打包并通过 verify 后) | 790 GB |
+   | `/scratch/cxip_v4/data/pixiv-s1` (s1 原始 tar，AI 图语料库，§6.1) | 336 GB |
+   | `/scratch/cxip_v4/data/pixiv-artist-v1` (由 s1 图构成，不能用) | 91 GB |
+   | `/scratch/cxip_v4/data/pixiv-artist-v1-work` (其中 `resized` 89 GB) | 89 GB |
 
-   `pixiv-artist-v1-work/resized` (89 GB) 和 `pixiv-artist-v1` 建议等 §6.1 修复方案定下来再决定：图片本身没错，修复后重建时可能复用。
+   Pixiv 相关的四项 (pixiv-s1、pixiv-artist-v1、pixiv-artist-v1-work 和两个 pilot) 无论选 (a) 还是 (b) 都不会再用，可以一起删，合计约 516 GB。B3 的 index 很小，可以留作记录。以上都没删，等用户同意。
 
 ## 8. 复现与结果位置
 
@@ -424,8 +476,7 @@ B3 test 上的 PR-AUC：
 
 **结果**：
 - `/scratch/cxip_v4/eval/bench2_v1/results_{dev,test}.{json,md}`；
-- 运行脚本：`run_bench2.sh`；
-- 本文表格的渲染脚本：`tools/tables.py`；
+- 本文 §3 的表和 §4 的阈值迁移表由仓库里的 `v3.scripts.bench2_tables` 从结果 JSON 生成 (命令见下)；
 - near_style 注入名单：`/scratch/cxip_v4/data/bench2_v1/inject/bench2_{b1,b2}_near_style.parquet` + `manifest_near_style.json`。
 
 **命令** (仓库根目录，`PY=/home/ubuntu/miniconda3/envs/cxip/bin/python`)：
@@ -437,5 +488,17 @@ CUDA_VISIBLE_DEVICES=5 PYTHONPATH=. $PY -m v3.scripts.gap_feats exp /data/neko/c
 CUDA_VISIBLE_DEVICES=6 PYTHONPATH=. $PY -m v3.scripts.eval_kaloscope --sets $S
 HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=6 PYTHONPATH=. $PY -m v3.scripts.extract_release_feats --model dghstmp/AnimeCSIP-v2.1 --sets $S --out-dir /scratch/cxip_v4/eval/bench2_v1/csip_v21 --batch-size 32
 CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.data.bench2_sets inject-near --feats /scratch/cxip_v4/eval/bench2_v1/csip_v21/feats
-/scratch/cxip_v4/eval/bench2_v1/run_bench2.sh test    # 然后 dev
+K=/data/neko/cxip_v3/eval/kaloscope3/proj256/feats; E=/scratch/cxip_v4/eval/bench2_v1
+for SPLIT in test dev; do                           # SCALE / BIAS / THR: 发布版 config, x4 exp, Kaloscope meta.json
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_eval \
+    --model v3_release $E/v3_release/feats 18.2881 -9.875 -0.5819 \
+    --model v3_x4 $E/v3_x4/feats 18.875 -9.9375 0 \
+    --model kaloscope $K 38.22643280029297 -18.096269607543945 0 \
+    --split $SPLIT --n-boot 1000 --out $E/results_$SPLIT.json --md $E/results_$SPLIT.md
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_tables $E/results_$SPLIT.json bench2_b1 bench2_b2
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_tables $E/results_$SPLIT.json --transfer bench2_b1 bench2_b2 csip_eval_public
+done
 ```
+
+- 两个 v3 特征目录里的旧集合 npz 是软链接，见上表。
+- `bench2_eval` 读取时用 `load_aligned` 按 sample_key 对齐。
