@@ -1,5 +1,7 @@
 # CSIP v4 P0 基线报告 (检查点)
 
+> **注意：`/scratch/cxip_v4/eval/bench2_v1/results_{dev,test}.md` (CLI 原始输出) 里的 G2 `max_cross_f1_loss` 含无效的 B3-P2，已作废；修正版是同目录的 `results_{dev,test}_g2fix.md` (由同一 JSON 重算，未重跑评测)，本文 §4 的数值与修正版一致。**
+
 日期：2026-10-31。分支 `csip-v4-p0`。依据的设计文档：`docs/csip_next_plan_2026-10-27_zh.md` (下称 spec)。
 本文只有汇总数字，不含画师名、图片和来源链接。逐项结果 JSON / markdown 在 `/scratch/cxip_v4/eval/bench2_v1/` (见 §8)。
 
@@ -14,11 +16,15 @@
    - 要用户选：(a) 另找真实的 Pixiv 图片来源 (例如按 `pixiv_index` 的图片 URL 重新下载)，或 (b) v4 不用 Pixiv，去掉 A7 和 B3 (§7)。
 2. **B1 / B2 基线：v3 x4 (未擦除) 在主指标层显著高于 v3 发布版。**
    - <1 年层 PR-AUC：x4 比发布版高 0.032 (B1 test) / 0.030 (B2 test)，dev 上为 0.030 / 0.019，95% CI 都不跨 0。
-   - 例外都在 B2 dev，CI 跨 0：
-     - 3-6 年层 PR-AUC (+0.013)；
+   - PR-AUC 和 `recall@1e-3` 的例外都在 B2 dev，CI 跨 0：
+     - 3-6 年层 PR-AUC (+0.013，重加权后 +0.021)；
      - ≥6 年层 PR-AUC (-0.002，重加权后 +0.002)；
      - ≥6 年层 `recall@1e-3` (+0.015)。
-   - B1 dev / test 和 B2 test 上，x4 在全部时间层 (PR-AUC 和召回) 都显著高于发布版。
+   - B1 dev / test 和 B2 test 上，x4 在全部四个时间层的 PR-AUC 和 `recall@1e-3` 都显著高于发布版。
+   - `recall@1e-4` 有更多跨 0 的层：
+     - B1 dev / test 四层都显著；
+     - B2 test 的 ≥6 年层跨 0 (+0.011)；
+     - B2 dev 只有 1-3 年层显著 (+0.025)，<1 年 (+0.013)、3-6 年 (+0.006)、≥6 年 (-0.003) 都跨 0。
    - Kaloscope 在 B1 的 <1 年层与 v3 发布版持平 (test +0.002、dev +0.008，CI 跨 0)。
    - Kaloscope 在 B1 的 ≥6 年层、B2 的 <1 年和 1-3 年层都显著低于发布版。B1 的 1-3 年层只在 test 上显著 (-0.023)，dev 上不显著。
    - **年代估计和远期注入上 Kaloscope 最好 (B1)**：
@@ -27,6 +33,8 @@
      - `bad_date` 只在 test 上显著高 (+0.010)；
      - B2 上这两类注入三者无显著差异。
 3. **G2 阈值迁移 (bench2 口径，B1 + B2 + csip_eval_public，不含 B3)：** 最大跨集 F1 损失 (test / dev) 为 v3 发布版 0.077 / 0.054、x4 0.080 / 0.060、Kaloscope 0.058 / 0.039。
+   - 这些只是点估计，还没有 CI。
+   - 同一模型 dev ↔ test 的波动 (发布版 0.054 → 0.077，+0.023) 已大于 v3 发布版与 Kaloscope 的差 (dev 0.015、test 0.019)，所以目前不能据此判断谁更稳定 (§4)。
 4. **合理性检查全部通过 (§5)：**
    - 三个模型在 B1 上都有 `pr_auc/<1y` > `pr_auc/>=6y`；
    - B1 的日期中位数基线误差为 2.19 年 (> 2 年)；
@@ -95,6 +103,7 @@
   - v3 x4：18.875 / -9.9375，阈值 0；
   - Kaloscope：38.226 / -18.096，阈值 0。
 - 参照模型是 v3 发布版。diff 列为同一组重采样下的配对差 (其他模型 − 发布版)。
+- `ap/<1y` 与 `pr_auc/<1y` 是同一个量：两者由同一个正负对直方图算出，表中只差在小数点后第 4 位。它不是独立的检索信号，读表时只算一项。
 - 内容指标 `same_char_fpr` / `same_copy_fpr` / `cross_content_recall` 在各模型的默认阈值下计算 (裁定 R14)；JSON 里另有 `@best` 版本。
 - 年代指标只用原发日期可靠 (非上传时间) 的图作真值。
   - `date_mae_content` 排除共享角色 / 作品标签的近邻。这样候选不足 10 张的图更多，它和 `date_mae_baseline` 不是在同一批图上算的，不能直接相减。
@@ -257,12 +266,18 @@
   - Kaloscope 0.807 / 0.647 (训练中见过这些画师)；
   - x4 0.837 / 0.716。
 
-  未擦除的 x4 比发布版高约 0.03-0.05，与 spec §0.2 "事后擦除每个集合损失约 0.02" 的诊断方向一致。在 bench2 上损失更大，层越远越大 (≥6 年 +0.048)。
+  未擦除的 x4 比发布版高约 0.03-0.06，与 spec §0.2 "事后擦除每个集合损失约 0.02" 的诊断方向一致，在 bench2 上损失更大。
+  - 差值不是随层单调增大的。B1 上 x4 − 发布版的 PR-AUC 差 (<1 年 / 1-3 年 / 3-6 年 / ≥6 年)：
+    - test：+0.032 / +0.045 / +0.059 / +0.048；
+    - dev：+0.030 / +0.044 / +0.046 / +0.029。
+  - 两个 split 都是到 3-6 年层最大，≥6 年层回落；dev 的 ≥6 年层与 <1 年层相当。
 - **G5 的参照水平 (B1 test，≥6 年层)：**
   - PR-AUC：v3 发布版 0.204，Kaloscope 0.123；
   - 召回 @FPR 1e-3：发布版 0.325，Kaloscope 0.222。
-- **B2 上 Kaloscope 在每个时间层都低于 v3 发布版：**
-  - <1 年 -0.025，1-3 年 -0.056，CI 都不跨 0；重加权后结论不变。
+- **B2 上 Kaloscope 在大多数时间层都低于 v3 发布版：**
+  - test：<1 年 -0.025，1-3 年 -0.056，3-6 年 -0.064，CI 都不跨 0；重加权后这三层结论不变。
+  - B2 test 的 ≥6 年层不显著：原始 -0.002，重加权后 -0.016，CI 都跨 0。
+  - dev 上四层都显著低 (≥6 年 -0.014，重加权后 -0.032)。
   - spec §0.2 的公平集 (csip_unseen_v1) 差距是 0.03，这里方向一致。
 - **G3 年代 (B1 test)：**
   - 年代误差：发布版 0.90 年，Kaloscope 0.80 年 (配对差 -0.10，CI 不跨 0)，日期中位数基线 2.19 年。
@@ -273,6 +288,8 @@
   - 跨内容正对召回上 Kaloscope 最低 (B1 test 0.49，v3 约 0.56)，dev 一致。
 
   这与 spec §0.2 "Kaloscope 同角色误报约为 v3 两倍" (在 test100 上、按旧阈值口径) 不同。原因可能是口径不同：这里各模型用自己的默认阈值 (Kaloscope 阈值 0 对应 FPR 约 1e-3，与 v3 相近)。
+
+  另外，各模型默认阈值下的总体 FPR 并不相同。例如 B1 dev 上 x4 为 0.0006、发布版 0.0009、Kaloscope 0.0007 (§4 表)。所以上面的 `same_char_fpr` 差值有一部分来自总体 FPR 的差别，不完全是内容偏置。在相同总体 FPR 下比较列在 P1 前置事项 (§7)。
 - **清洗注入：**
   - 四类 AUROC 都很高 (0.91-0.999)，区分度主要在 `far_period` (B1：v3 0.91 / K 0.94) 和 `near_style`。
   - B2 的 `far_period` 只有 37 个 test 文件夹、`bad_date` 57 个，CI 宽 (见 §7)。
@@ -282,7 +299,10 @@
 做法：每个来源各用 all 组曲线定 best-F1 阈值，迁移到其他来源，报告 F1 损失 (`pairwise.threshold_drift`，直方图估计)。
 
 - G2 的集合为 bench2_b1 (所评 split)、bench2_b2 (所评 split) 和 csip_eval_public。
-- spec 原定的 G2 集合还包括 B3-P2，因 §6.1 去掉。CLI 输出的 `max_cross_f1_loss` 含 B3-P2，是被污染的值，下表不用它。下表的值由同一 JSON 中 `drift.cross_f1_loss` 的逐对损失取最大得到。
+- spec 原定的 G2 集合还包括 B3-P2，因 §6.1 去掉。
+  - 原 CLI 输出 (`results_{dev,test}.md` 和 JSON 里的 `max_cross_f1_loss`) 含 B3-P2，是被污染的值，下表不用它。
+  - 下表的值由同一 JSON 中 `drift.cross_f1_loss` 的逐对损失取最大得到，同 `results_{dev,test}_g2fix.md`。
+  - 代码已改：`bench2.G2_SETS` 不再含 B3-P2，`bench2_eval` 默认只跑 B1 / B2，可用 `--g2-sets` 指定 G2 集合。
 
 | 指标 | v3 发布版 | v3 x4 | Kaloscope |
 |-|-|-|-|
@@ -295,7 +315,10 @@
 | 默认阈值 F1 / best F1，csip_eval_public | 0.762 / 0.822 (FPR 0.0039) | 0.797 / 0.834 (FPR 0.0030) | 0.774 / 0.802 (FPR 0.0030) |
 | 参考：旧三集口径最大损失 (test100_0918 / csip_eval_public / csip_unseen_v1) | 0.271 | 0.265 | 0.105 |
 
-- bench2 口径下 Kaloscope 的跨集稳定性仍然最好，但三者差距远小于旧口径。
+- **G2 目前没有 CI，只有点估计，不宜下 "谁更稳定" 的结论。**
+  - 同一模型 dev ↔ test 的波动 (发布版 0.054 → 0.077，+0.023；x4 +0.020；Kaloscope +0.019) 大于 v3 发布版与 Kaloscope 的差 (dev 0.015、test 0.019)。
+  - 点估计上 Kaloscope 较低，但三者差距远小于旧口径。
+  - 加 bootstrap CI (按画师配对，v4 − Kaloscope) 列在 P1 前置事项 (§7)。
   - 旧口径 (test100_0918 + csip_eval_public + csip_unseen_v1)：发布版 0.271、Kaloscope 0.105，与 spec §0.2 的 0.272 / 0.105 一致。
   - 旧口径下最大损失来自 test100_0918 (多为长职业、旧图) 与其他集合之间。
   - bench2 的 G2 集合里没有 test100_0918 这样的极端集合。
@@ -424,6 +447,13 @@ B3 test 上的 PR-AUC：
   - 实测约一半注入图来自另一个 split 的画师：B1 near_style 50.4%、same_char 48.7%；B2 near_style 49.3%、same_char 48.5%。
   - 只用于打分，不影响 split 隔离 (不调参、不训练)。
   - `near_style` 的挖掘模型是 CSIP v2.1 (不参与评测)。B1 注入 2,174 张 / 550 个文件夹，B2 注入 805 张 / 400 个文件夹，没有跳过的文件夹。
+- **同日图对的处理 (与 spec §5.3 的差别)**：
+  - 年代估计排除的是同一 **原发日期** (`date_day`) 的近邻，spec §5.3 写的是 "排除同一上传日"。
+    - 日期校正到原发时间后，按原发日排除更合理：同一天发出的图通常是同一批，留着会让年代估计偏乐观；而上传日在校正后已不是年代真值。
+  - 时间分层直方图 (PR-AUC / 召回) 和时间窗检索 (`map_at_r/1y`、`r1/1y`) 都没有排除同日图对，只排除了同一作品族。
+    - 同一原发日的对占 <1 年层同画师正对的比例：B1 dev 2.8%、test 3.2%；B2 dev 9.9%、test 6.9%。按上传日匹配，复核得到 B2 约 17%。
+    - 同日图对通常更像，所以 <1 年层的绝对数值可能偏高，B2 上更明显。模型之间的配对差受的影响应较小，因为各模型用的是同一批图对。
+  - 排除同日图对的 <1 年版本列在 P1 前置事项 (§7)。
 - **Pixiv 行没有角色 / 作品标签**：它们的内容指标没有信息量。分级按 x_restrict 映射 (0 → g，否则 e)。
 - **B1 总图数**：全部 split 合计 63,098 张，spec 粗估 "约 5 万"。这是因为补了 2025-2026 的新图、每画师上限 80，不是缺陷。B1 用 0918 `test_split.json` 的全部 800 个画师 (裁定 R7；spec 写 798，多出的几个也都在 v3 训练中被排除)。
 - **口径约定**：
@@ -442,11 +472,13 @@ B3 test 上的 PR-AUC：
 ## 7. 需要用户决定的事项
 
 1. **Pixiv 部分 (§6.1)**：s1 是 AI 图语料库，不能用。请在两个选项中选一个：
-   - **(a)** 另找真实 Pixiv 图片来源 (如按 `pixiv_index` URL 重新下载，约 229 万张、缩后约 270 GB)，然后重建 pixiv-artist-v2 和 bench2_v2 的 B3；
+   - **(a)** 另找真实 Pixiv 图片来源 (如按 `pixiv_index` URL 重新下载；估算约 229 万张、缩后约 270 GB，均未实测)，然后重建 pixiv-artist-v2 和 bench2_v2 的 B3；
    - **(b)** v4 不用 Pixiv，去掉 A7 和 B3。
 
    决定前，P1 训练只用 Danbooru 数据，G2 用 B1 + B2 + csip_eval_public。
 2. **G2 口径**：是否以 bench2 口径 (§4) 为准、旧三集口径为辅？
+   - 注意 bench2 口径目前没有 CI。
+   - 单个模型 dev ↔ test 的波动 (发布版 0.054 → 0.077) 已大于 v3 与 Kaloscope 的差，所以加 CI 之前不宜用它判定 G2。
 3. **same_char / near_style 是否按 split 分别重生成注入名单** (R17)：目前约一半注入图来自另一个 split 的画师。
 4. **若选 (a)，B3 的规模**：每个 B1 画师 ≤40 个作品、B3-P2 300 个账号 (≥30 作品) 的设定是否保持。
 5. **是否删除已被替代的中间数据** (只列候选，未删)：
@@ -461,7 +493,15 @@ B3 test 上的 PR-AUC：
    | `/scratch/cxip_v4/data/pixiv-artist-v1` (由 s1 图构成，不能用) | 91 GB |
    | `/scratch/cxip_v4/data/pixiv-artist-v1-work` (其中 `resized` 89 GB) | 89 GB |
 
-   Pixiv 相关的四项 (pixiv-s1、pixiv-artist-v1、pixiv-artist-v1-work 和两个 pilot) 无论选 (a) 还是 (b) 都不会再用，可以一起删，合计约 516 GB。B3 的 index 很小，可以留作记录。以上都没删，等用户同意。
+   Pixiv 相关的五项 (pixiv-s1、pixiv-artist-v1、pixiv-artist-v1-work 和两个 pilot) 无论选 (a) 还是 (b) 都不会再用，可以一起删，合计约 516 GB。B3 的 index 很小，可以留作记录。以上都没删，等用户同意。
+   - `pixiv-artist-v1/INVALID.txt` 已写明该数据无效、不能用于训练和评测 (指向 §6.1)。没有改名或删除任何文件。
+
+### P1 前置事项 (不需要用户决定，P1 开始前做)
+
+1. **G2 的 bootstrap CI**：按画师配对重采样 (v4 − Kaloscope)，报告最大跨集 F1 损失之差的 CI。
+2. **排除同日图对的 <1 年层**：时间分层直方图和时间窗检索都加一个排除同日图对的 <1 年版本 (§6.2)。
+3. **相同总体 FPR 下的 `same_char_fpr`**：在相同总体 FPR (如 1e-3) 下报告。现在各模型默认阈值的总体 FPR 不同 (B1 dev：x4 0.0006，发布版 0.0009)，见 §3.3。
+4. **集合名带版本号** (裁定 R19)：若重建 B3，新集合应升版本号 (bench2_v2)，`INDEX_SETS` 里的集合名也带上版本，避免新旧特征和结果混用。
 
 ## 8. 复现与结果位置
 
@@ -475,11 +515,52 @@ B3 test 上的 PR-AUC：
 | CSIP v2.1 (只用于挖 near_style) | `/scratch/cxip_v4/eval/bench2_v1/csip_v21/feats` | |
 
 **结果**：
-- `/scratch/cxip_v4/eval/bench2_v1/results_{dev,test}.{json,md}`；
+- `/scratch/cxip_v4/eval/bench2_v1/results_{dev,test}.{json,md}`：原始输出，其 .md 和 JSON 里的 G2 `max_cross_f1_loss` 含 B3-P2，已作废；
+- `/scratch/cxip_v4/eval/bench2_v1/results_{dev,test}_g2fix.md`：G2 修正版，由同一 JSON 重算，未重跑，命令见下；
 - 本文 §3 的表和 §4 的阈值迁移表由仓库里的 `v3.scripts.bench2_tables` 从结果 JSON 生成 (命令见下)；
 - near_style 注入名单：`/scratch/cxip_v4/data/bench2_v1/inject/bench2_{b1,b2}_near_style.parquet` + `manifest_near_style.json`。
 
-**命令** (仓库根目录，`PY=/home/ubuntu/miniconda3/envs/cxip/bin/python`)：
+**数据阶段命令** (仓库根目录，`PY=/home/ubuntu/miniconda3/envs/cxip/bin/python`；均为纯 CPU，`CUDA_VISIBLE_DEVICES=`)：
+- 命令取自各模块的 docstring；
+- `resize` 的 workers 数取自 `/scratch/cxip_v4/logs/{dbv2,pixiv_v1}.log`；
+- 长任务用 nohup 跑，日志写到 `/scratch/cxip_v4/logs/`。
+
+```bash
+export CUDA_VISIBLE_DEVICES= PYTHONPATH=.
+# danbooru-artist-v2 (原发日期校正在 prepare 里，只用 pixiv_index 元数据，不经过 s1)
+$PY -m v3.data.build_danbooru_artist_v2 prepare
+$PY -m v3.data.build_danbooru_artist_v2 jobs                    # WORK/jobs.parquet
+$PY -m v3.data.build_danbooru_artist_v2 resize --workers 160    # 可断点续跑
+$PY -m v3.data.build_danbooru_artist_v2 build                   # neko-data 打包，可续跑
+$PY -m v3.data.build_danbooru_artist_v2 verify
+# Pixiv 元数据 (无效：s1 是 AI 图语料库，§6.1；只为记录实际跑过的步骤，不要再用)
+$PY -m v3.data.fetch_pixiv_s1 index                             # 无效
+$PY -m v3.data.fetch_pixiv_s1 table                             # 无效
+$PY -m v3.data.fetch_pixiv_s1 tars                              # 无效
+$PY -m v3.data.pixiv_meta prepare                               # 无效 (works / accounts 表按 s1 图构造)
+# benchmark v2 划分 (B3 部分无效)：读 danbooru-artist-v2 的画师表和 pixiv_meta 的 accounts 表；
+# 之后的两个训练 index 和 build_pixiv_artist 都读 splits.json 的排除名单
+$PY -m v3.data.bench2_splits                                    # BENCH/{splits.json, manifest.json}；splits.json 含画师名，只放在 /scratch
+$PY -m v3.data.build_index danbooru_v2                          # index/{all,train_ge30,train_ge10}.parquet
+# pixiv-artist-v1 (无效)
+$PY -m v3.data.build_pixiv_artist prepare                       # 无效
+$PY -m v3.data.build_pixiv_artist jobs                          # 无效
+$PY -m v3.data.build_pixiv_artist resize --workers 48           # 无效
+$PY -m v3.data.build_pixiv_artist build                         # 无效
+$PY -m v3.data.build_pixiv_artist verify                        # 无效
+$PY -m v3.data.build_index pixiv_v1                             # 无效
+# benchmark v2 集合
+$PY -m v3.data.bench2_sets build                                # BENCH/bench2_{b1,b2,b3p1,b3p2}{,_sealed}
+$PY -m v3.data.bench2_sets inject                               # same_char / far_period / bad_date 注入名单
+$PY -m v3.data.bench2_sets inject-near --feats /scratch/cxip_v4/eval/bench2_v1/csip_v21/feats   # 需先提 v2.1 特征 (下)
+# 方案 (a) 的规模粗估 (只打印计数)
+$PY -m v3.scripts.pixiv_scope
+```
+
+**特征与评测命令**：
+- 提特征的脚本现在拒绝覆盖已存在的 npz，要覆盖须加 `--overwrite`；
+- 符号链接目标在任何情况下都拒绝写；
+- 下面是本轮实际运行的命令 (当时没有这些保护)。
 
 ```bash
 S="bench2_b1 bench2_b2 bench2_b3p1 bench2_b3p2"
@@ -490,15 +571,20 @@ HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=6 PYTHONPATH=. $PY -m v3.scripts.extract_r
 CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.data.bench2_sets inject-near --feats /scratch/cxip_v4/eval/bench2_v1/csip_v21/feats
 K=/data/neko/cxip_v3/eval/kaloscope3/proj256/feats; E=/scratch/cxip_v4/eval/bench2_v1
 for SPLIT in test dev; do                           # SCALE / BIAS / THR: 发布版 config, x4 exp, Kaloscope meta.json
-  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_eval \
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_eval --sets $S \
     --model v3_release $E/v3_release/feats 18.2881 -9.875 -0.5819 \
     --model v3_x4 $E/v3_x4/feats 18.875 -9.9375 0 \
     --model kaloscope $K 38.22643280029297 -18.096269607543945 0 \
     --split $SPLIT --n-boot 1000 --out $E/results_$SPLIT.json --md $E/results_$SPLIT.md
   CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_tables $E/results_$SPLIT.json bench2_b1 bench2_b2
   CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_tables $E/results_$SPLIT.json --transfer bench2_b1 bench2_b2 csip_eval_public
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=. $PY -m v3.scripts.bench2_tables $E/results_$SPLIT.json --g2fix $E/results_${SPLIT}_g2fix.md
 done
 ```
+
+- 当时的 `bench2_eval` 默认跑四个集合，G2 含 B3-P2。
+- 现在默认只跑 `bench2_b1 bench2_b2`，G2 默认为 B1 + B2 + csip_eval_public (`--g2-sets` 可改)。
+- 上面加了 `--sets $S`，以复现原 JSON 的集合；重跑得到的 `max_cross_f1_loss` 已是修正后的 G2 口径。
 
 - 两个 v3 特征目录里的旧集合 npz 是软链接，见上表。
 - `bench2_eval` 读取时用 `load_aligned` 按 sample_key 对齐。
