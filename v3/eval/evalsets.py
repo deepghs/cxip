@@ -25,6 +25,11 @@ OPENSET = EVAL_ROOT / 'ccip_openset_v1'
 CROSSCHAR = EVAL_ROOT / 'csip_crosschar_v1'
 # index.parquet 形式的评测集 (path, label_name, label, sample_key); csip_unseen_v1 见 v3/scripts/build_csip_unseen.py
 INDEX_SETS = {'csip_unseen_v1': Path('/data/neko/cxip_v3/data/csip_unseen_v1')}
+# benchmark v2 (v3/data/bench2_sets.py): 常规名字只含 dev / test 行, sealed 行在单独的 *_sealed 目录
+BENCH2 = Path('/scratch/cxip_v4/data/bench2_v1')
+for _s in ('b1', 'b2', 'b3p1', 'b3p2'):
+    INDEX_SETS[f'bench2_{_s}'] = BENCH2 / _s
+    INDEX_SETS[f'bench2_{_s}_sealed'] = BENCH2 / f'{_s}_sealed'
 ISEK_GLOB = '/data/.hf/hub/datasets--isek-ai--danbooru-tags-2024/snapshots/*/data/*.parquet'
 _A = 'data/danbooru-w640-ws-full-artist'
 LEGACY_SETS = {
@@ -120,13 +125,18 @@ def load_legacy(name):
 
 
 def load_index_set(name):
-    """INDEX_SETS: 返回 (df[path, label_name, label, sample_key, ...], read_image)"""
+    """INDEX_SETS: 返回 (df[path, label_name, label, sample_key, ...], read_image).
+    df 有 tar 列时 (bench2 集合) 按 (tar, offset, size) pread 读打包 tar; 否则 path 是单图文件, 整个读."""
     df = pd.read_parquet(INDEX_SETS[name] / 'index.parquet').reset_index(drop=True)
+    packed = 'tar' in df.columns
 
     def read_image(i, decode=True):
         row = df.iloc[i] if isinstance(i, (int, np.integer)) else i
-        with open(row['path'], 'rb') as f:
-            b = f.read()
+        if packed:
+            b = _pread(row['tar'], row['offset'], row['size'])
+        else:
+            with open(row['path'], 'rb') as f:
+                b = f.read()
         return decode_image(b) if decode else b
     return df, read_image
 
