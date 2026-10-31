@@ -174,7 +174,10 @@ def curve_metrics(pos: np.ndarray, neg: np.ndarray, scale: float, bias: float, f
     if not (n_pos > 0 and n_neg > 0):
         return None
     nz = np.nonzero((pos + neg) > 0)[0][::-1]                # 从高到低
-    tp, fp, P, R, F1, FPR = _curves_from_counts(pos[nz], neg[nz], n_pos, n_neg)
+    # _curves_from_counts 的分母是 max(n, 1): 加权总数 < 1 时 recall / FPR 会被缩小. 正负同乘一个系数使较小者 = 1
+    # (precision 对共同缩放不变, recall / FPR 变为精确); 对外仍报告未缩放的 n_pos / n_neg
+    k = 1.0 / min(n_pos, n_neg)
+    tp, fp, P, R, F1, FPR = _curves_from_counts(pos[nz] * k, neg[nz] * k, n_pos * k, n_neg * k)
     thr_cos = _edge_cos(nz)
     thr_score = scale * thr_cos + bias
     out = dict(n_pos_pairs=n_pos, n_neg_pairs=n_neg)

@@ -149,3 +149,21 @@ def test_drift_spearman():
     assert T.drift_spearman(d, lab, np.full(45, 2000.0), np.arange(45)).shape == (0,)
     # same-family pairs are dropped: all one family -> nothing left
     assert T.drift_spearman(d, lab, t, np.zeros(45, int)).shape == (0,)
+
+
+def test_fractional_weights_below_one_are_scale_invariant():
+    rng = np.random.default_rng(1)
+    lab = np.repeat(np.arange(10), 30); f = rng.standard_normal((300, 16)) + 3 * rng.standard_normal((10, 16))[lab]
+    h = T.artist_histograms(f, lab, np.full(300, 2020.0), np.arange(300), scale=10, bias=-5)
+    ref = T.stratified_metrics(h)['all']
+    for c in (1e-4, 1e-9, 1e4):
+        m = T.stratified_metrics(h, np.full(10, c))['all']
+        for k in ('pr_auc', 'ap', 'roc_auc', 'best_f1', 'recall_at_best', 'precision_at_best', 'recall@fpr0.001',
+                  'recall@fpr0.0001'):
+            assert abs(m[k] - ref[k]) < 1e-9, (c, k, m[k], ref[k])
+        assert m['best_threshold'] == ref['best_threshold']
+        assert abs(m['n_pos_pairs'] - c * ref['n_pos_pairs']) < 1e-9 * max(1, c * ref['n_pos_pairs'])  # unscaled counts
+    # curve_metrics directly: total pos weight < 1 and total neg weight >> 1
+    pos = np.zeros(T.N_BINS); neg = np.zeros(T.N_BINS); pos[9000] = 0.3; neg[3000] = 500.0
+    m = T.curve_metrics(pos, neg, 1.0, 0.0)
+    assert m['recall_at_best'] == 1.0 and m['best_f1'] == 1.0 and m['n_pos_pairs'] == 0.3
