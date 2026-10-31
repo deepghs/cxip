@@ -67,3 +67,60 @@ def test_retrieval_bruteforce():
     assert r['map_at_r'] == pytest.approx(m, abs=1e-6)
     assert r['recall_at_1'] == pytest.approx(r1, abs=1e-9)
     assert r['n_queries'] == nq
+
+
+def test_bcubed():
+    assert cl.bcubed([0, 0, 1, 1], [5, 5, 7, 7])['f'] == 1.0
+    r = cl.bcubed([0, 0, 1, 1], [3, 3, 3, 3])
+    assert np.isclose(r['precision'], 0.5) and r['recall'] == 1.0
+    assert cl.bcubed([0, 0, -1], [1, 1, -1])['f'] == 1.0
+
+
+def test_bcubed_noise_and_distractors_are_singletons():
+    # all points called noise: every pred cluster is a singleton -> precision 1, recall low
+    r = cl.bcubed([0, 0, 1, 1], [-1, -1, -1, -1])
+    assert r['precision'] == 1.0 and np.isclose(r['recall'], 0.5)
+    # distractors merged into one pred cluster hurt precision
+    r = cl.bcubed([0, 0, -1, -1], [1, 1, 2, 2])
+    assert np.isclose(r['precision'], (1 + 1 + 0.5 + 0.5) / 4) and r['recall'] == 1.0
+
+
+def _pca_reduce(monkeypatch):
+    real = cl.reduce_features
+    monkeypatch.setattr(cl, 'reduce_features',
+                        lambda feats, method='umap', *a, **k: real(feats, 'pca' if method == 'umap' else method, *a, **k))
+
+
+def test_mixed_pool_clustering_keys_and_separable(monkeypatch):
+    _pca_reduce(monkeypatch)
+    f, l = blobs(n_cls=12, per=10)
+    r = cl.mixed_pool_clustering(f, l, n_pools=3, n_artists=5, max_per_artist=8, n_distractors=20, seed=0,
+                                 mcs_range=range(3, 6))
+    for mode in ('umap', 'none'):
+        m = r[mode]
+        assert len(m['bcubed_f']) == 3 and len(m['ari']) == 3
+        assert m['bcubed_f_mean'] == pytest.approx(np.mean(m['bcubed_f']))
+        assert m['ari_std'] == pytest.approx(np.std(m['ari']))
+        assert len(m['best_mcs']) == 3
+    assert r['none']['bcubed_f_mean'] > 0.8
+    assert r['n_artists'] == 5 and r['n_pools'] == 3
+
+
+def test_mixed_pool_clustering_clamps_small_sets(monkeypatch):
+    _pca_reduce(monkeypatch)
+    f, l = blobs(n_cls=6, per=6)
+    r = cl.mixed_pool_clustering(f, l, n_pools=2, n_artists=100, max_per_artist=40, n_distractors=1000,
+                                 mcs_range=range(2, 4))
+    assert r['n_artists'] == 3          # A // 2
+    assert r['n_distractors'] == 3 * 6  # remaining artists' images only
+    assert np.isfinite(r['none']['bcubed_f_mean'])
+
+
+@pytest.mark.filterwarnings("ignore:n_jobs value 1 overridden")
+def test_mixed_pool_clustering_deterministic_and_real_umap():
+    f, l = blobs(n_cls=8, per=8)
+    kw = dict(n_pools=1, n_artists=4, max_per_artist=8, n_distractors=12, seed=5, mcs_range=range(3, 5))
+    a = cl.mixed_pool_clustering(f, l, **kw)
+    b = cl.mixed_pool_clustering(f, l, **kw)
+    assert a['umap']['bcubed_f'] == b['umap']['bcubed_f']
+    assert a['umap']['reduce'] in ('umap', 'pca')

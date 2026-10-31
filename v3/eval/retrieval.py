@@ -48,3 +48,54 @@ def retrieval_eval(feats, labels, ks=(1, 5), chunk=1024) -> dict:
     for k in ks:
         out[f'recall_at_{k}'] = hit[k] / max(n_q, 1)
     return out
+
+
+def _codes(x):
+    return np.unique(np.asarray(x), return_inverse=True)[1].reshape(-1)
+
+
+def window_retrieval(feats, labels, t_year, family, window=1.0, query=None, gallery=None, chunk=1024) -> dict:
+    """时间窗检索 (benchmark v2 零样本检索口径), 返回逐查询数组 (长度 N, 非查询 / 无相关项为 NaN).
+    查询 i 的库 = gallery 中除自身、同 family、以及 "同画师且 |Δt| >= window" 之外的全部图;
+    相关项 = 同画师且 |Δt| < window (window=None: 同画师任意时期都相关). R = 该查询的相关项数,
+    map_at_r 的定义同 retrieval_eval (前 R 个里 precision@i 在相关命中处求和再除以 R); r1 = 首位是否相关.
+    """
+    f = torch.nn.functional.normalize(torch.as_tensor(np.asarray(feats)).float(), dim=-1)
+    n = len(f)
+    lab = torch.as_tensor(_codes(labels))
+    fam = torch.as_tensor(_codes(family))
+    t = torch.as_tensor(np.asarray(t_year, dtype=np.float64))
+    q_mask = np.ones(n, bool) if query is None else np.asarray(query, bool)
+    g_mask = np.ones(n, bool) if gallery is None else np.asarray(gallery, bool)
+    g_idx = torch.as_tensor(np.nonzero(g_mask)[0])
+    fg, lab_g, fam_g, t_g = f[g_idx], lab[g_idx], fam[g_idx], t[g_idx]
+    G = len(g_idx)
+    ap_out = np.full(n, np.nan)
+    r1_out = np.full(n, np.nan)
+    with torch.no_grad():
+        for r0 in range(0, n, chunk):
+            qi = np.nonzero(q_mask[r0:min(n, r0 + chunk)])[0] + r0
+            if len(qi) == 0 or G == 0:
+                continue
+            it = torch.as_tensor(qi)
+            same = lab[it][:, None] == lab_g[None]                                    # (q, G)
+            near = same if window is None else same & ((t[it][:, None] - t_g[None]).abs() < window)
+            valid = (fam[it][:, None] != fam_g[None]) & (~same | near)               # 同 family (含自身) 与窗外同画师被移出库
+            rel_m = near & valid
+            R = rel_m.sum(1)
+            ok = R > 0
+            if not ok.any():
+                continue
+            s = f[it] @ fg.T
+            s = s.masked_fill(~valid, -float('inf'))
+            kk = int(min(R.max().item(), G))
+            top = s.topk(kk, dim=1).indices
+            rel = torch.gather(rel_m, 1, top).float()                                 # (q, kk)
+            Rf = R.clamp(min=1).float()
+            pos = torch.arange(1, kk + 1).float()
+            prec = rel.cumsum(1) / pos[None]
+            ap = (prec * rel * (pos[None] <= Rf[:, None])).sum(1) / Rf
+            ok_np = ok.numpy()
+            ap_out[qi[ok_np]] = ap.numpy()[ok_np]
+            r1_out[qi[ok_np]] = rel[:, 0].numpy()[ok_np]
+    return dict(map_at_r=ap_out, r1=r1_out)
