@@ -1,6 +1,8 @@
 """用发布的 HF CxIP 模型 (本地目录或 hub repo, AutoModel + AutoImageProcessor) 给任意评测集提特征, 存 runner 的 npz 格式。
 
 特征 = get_image_features(normalize=False) (head 输出, CSIP v3 的事后擦除已折进 head), scale / bias 取模型 sim。
+旧版 HF CxIP (CAFormer, 如 dghstmp/AnimeCSIP-v2.1) 没有 get_image_features: 同 eval_hf_ccip, fp32 权重 + bf16 autocast,
+取 model(x)['features']。
 用法: CUDA_VISIBLE_DEVICES=5 python -m v3.scripts.extract_release_feats --model /data/neko/cxip_v3/release/AnimeCSIP-v3 \\
           --sets csip_unseen_v1 --out-dir /data/neko/cxip_v3/eval/release_csip_v3
 """
@@ -25,8 +27,21 @@ def main():
     args = ap.parse_args()
     out = Path(args.out_dir)
     (out / 'feats').mkdir(parents=True, exist_ok=True)
-    model = AutoModel.from_pretrained(args.model, trust_remote_code=True, dtype=torch.bfloat16).cuda().eval()
+    model = AutoModel.from_pretrained(args.model, trust_remote_code=True).eval()
     proc = AutoImageProcessor.from_pretrained(args.model, trust_remote_code=True)
+    if hasattr(model, 'get_image_features'):
+        model = model.to(torch.bfloat16).cuda()
+
+        def encode(imgs):
+            return model.get_image_features(proc(imgs)['pixel_values'], normalize=False)
+    else:                                                    # 旧版 HF CxIP, 同 eval_hf_ccip
+        model = model.cuda()
+
+        @torch.no_grad()
+        def encode(imgs):
+            x = torch.stack([torch.tensor(np.asarray(proc(im)['pixel_values'][0])) for im in imgs]).cuda()
+            with torch.autocast('cuda', dtype=torch.bfloat16):
+                return model(x)['features']
     scale, bias = float(model.sim.logit_scale.float().exp()), float(model.sim.logit_bias.float())
     (out / 'meta.json').write_text(json.dumps(dict(model=args.model, scale=scale, bias=bias), indent=1))
     print('scale', scale, 'bias', bias, flush=True)
@@ -36,7 +51,7 @@ def main():
         with ThreadPoolExecutor(16) as ex:
             for b0 in range(0, len(df), args.batch_size):
                 imgs = list(ex.map(read, range(b0, min(len(df), b0 + args.batch_size))))
-                feats.append(model.get_image_features(proc(imgs)['pixel_values'], normalize=False).float().cpu().numpy())
+                feats.append(encode(imgs).float().cpu().numpy())
                 if b0 % (args.batch_size * 50) == 0:
                     print(f'{name} {b0}/{len(df)}', flush=True)
         f = np.concatenate(feats)

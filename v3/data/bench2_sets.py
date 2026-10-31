@@ -15,6 +15,9 @@ BENCH/{set} holds dev + test rows only, BENCH/{set}_sealed the sealed rows; each
 
     python -m v3.data.bench2_sets build
     python -m v3.data.bench2_sets inject     # BENCH/inject/bench2_{b1,b2}_{same_char,far_period,bad_date}.parquet
+    python -m v3.data.bench2_sets inject-near --feats FEATS_DIR
+        # BENCH/inject/bench2_{b1,b2}_near_style.parquet (+ manifest_near_style.json); FEATS_DIR/bench2_{b1,b2}.npz are
+        # features of a model that is not evaluated (CSIP v2.1), read with csip_full_eval.load_aligned
 """
 from __future__ import annotations
 
@@ -40,7 +43,7 @@ REGULAR = ('dev', 'test')
 FEW_IMAGES = 30
 PIXIV_FAMILY_OFFSET = 10 ** 10            # Pixiv family = artwork_id + offset, never equal to a Danbooru post id
 INJECT_SETS = ('b1', 'b2')
-INJECT_KINDS = ('same_char', 'far_period', 'bad_date')   # near_style needs features (Task 15)
+INJECT_KINDS = ('same_char', 'far_period', 'bad_date')   # near_style needs features: make_inject_near
 INJECT_FRAC = 0.05
 LIST_COLS = ('characters', 'copyrights')
 COLUMNS = ['path', 'tar', 'offset', 'size', 'sample_key', 'label', 'label_name', 'id', 'source', 'split', 'family',
@@ -315,27 +318,64 @@ def make_inject(root: Path = BENCH) -> dict:
         sys.exit(f'{out_dir} already has a manifest; bump the version instead of overwriting')
     out_dir.mkdir(parents=True, exist_ok=True)
     man = dict(seed=SEED, frac=INJECT_FRAC, kinds=list(INJECT_KINDS), splits=list(REGULAR),
-               note='folders over the dev + test rows of each set (sealed never used); near_style comes in Task 15; '
-                    'folder = set label; bench2 keeps the folders of the evaluated split', files={})
+               note='folders over the dev + test rows of each set (sealed never used); near_style is made by '
+                    'inject-near; folder = set label; bench2 keeps the folders of the evaluated split', files={})
     for s in INJECT_SETS:
         df, _ = evalsets.load_index_set(f'bench2_{s}')
         assert set(df['split']) <= set(REGULAR), f'bench2_{s} holds non dev/test rows'
         split_of = df.drop_duplicates('label').set_index('label')['split']
         for kind in INJECT_KINDS:
             p = out_dir / f'bench2_{s}_{kind}.parquet'
-            if p.exists():
-                raise FileExistsError(p)
             fo = inject.make_folders(df, kind, frac=INJECT_FRAC, seed=SEED)
-            st = {k: (v if isinstance(v, str) else int(v)) for k, v in fo.attrs.get('stats', {}).items()}
-            fs = fo.drop_duplicates('folder')['folder'].map(split_of).value_counts().to_dict()
-            fo = fo.reset_index(drop=True)
-            fo.attrs = {}
-            fo.to_parquet(p, index=False)
-            rec = dict(rows=int(len(fo)), injected=int(fo['injected'].sum()), folders=int(fo['folder'].nunique()),
-                       folders_by_split={k: int(v) for k, v in fs.items()}, stats=st)
-            man['files'][p.name] = rec
-            print(f'{p.name}: {rec}', flush=True)
+            man['files'][p.name] = _write_folders(fo, split_of, p)
     with open(out_dir / 'manifest.json', 'w') as f:
+        json.dump(man, f, indent=1)
+    return man
+
+
+def _write_folders(fo: pd.DataFrame, split_of: pd.Series, p: Path) -> dict:
+    """Write one folder table (refuses to overwrite); returns its manifest record."""
+    if p.exists():
+        raise FileExistsError(p)
+    st = {k: (v if isinstance(v, str) else int(v)) for k, v in fo.attrs.get('stats', {}).items()}
+    fs = fo.drop_duplicates('folder')['folder'].map(split_of).value_counts().to_dict()
+    fo = fo.reset_index(drop=True)
+    fo.attrs = {}
+    fo.to_parquet(p, index=False)
+    rec = dict(rows=int(len(fo)), injected=int(fo['injected'].sum()), folders=int(fo['folder'].nunique()),
+               folders_by_split={k: int(v) for k, v in fs.items()}, stats=st)
+    print(f'{p.name}: {rec}', flush=True)
+    return rec
+
+
+def make_inject_near(feats_dir, root: Path = BENCH) -> dict:
+    """near_style folders (spec 5.3 (a)): injected = the other artists' images nearest to each artist's feature
+    centroid, mined with features of a model that is not evaluated (FEATS_DIR/bench2_{s}.npz, aligned to the set by
+    sample_key).
+    Same rows / seed / frac as make_inject: dev + test rows together, so (as for same_char) an injected image can come
+    from an artist of the other split. Writes its own manifest_near_style.json (the inject manifest is left as is)."""
+    from v3.eval import evalsets, inject
+    from v3.scripts.csip_full_eval import load_aligned
+    out_dir = root / 'inject'
+    man_p = out_dir / 'manifest_near_style.json'
+    if man_p.exists():
+        sys.exit(f'{man_p} already exists; bump the version instead of overwriting')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    man = dict(seed=SEED, frac=INJECT_FRAC, kinds=['near_style'], splits=list(REGULAR), feats_dir=str(feats_dir),
+               note='folders over the dev + test rows of each set (sealed never used); injected images mined with the '
+                    'features in feats_dir (a model that is not evaluated); folder = set label; bench2 keeps the '
+                    'folders of the evaluated split', files={})
+    for s in INJECT_SETS:
+        name = f'bench2_{s}'
+        df, _ = evalsets.load_index_set(name)
+        assert set(df['split']) <= set(REGULAR), f'{name} holds non dev/test rows'
+        feats = load_aligned(feats_dir, name, df)
+        assert len(feats) == len(df) and np.isfinite(feats).all(), name
+        split_of = df.drop_duplicates('label').set_index('label')['split']
+        fo = inject.make_folders(df, 'near_style', frac=INJECT_FRAC, seed=SEED, feats=feats)
+        p = out_dir / f'{name}_near_style.parquet'
+        man['files'][p.name] = _write_folders(fo, split_of, p)
+    with open(man_p, 'w') as f:
         json.dump(man, f, indent=1)
     return man
 
@@ -346,5 +386,10 @@ if __name__ == '__main__':
         build()
     elif cmd == 'inject':
         make_inject()
+    elif cmd == 'inject-near':
+        import argparse
+        ap = argparse.ArgumentParser(prog='bench2_sets inject-near')
+        ap.add_argument('--feats', required=True, help='dir with bench2_b1.npz / bench2_b2.npz (runner npz format)')
+        make_inject_near(ap.parse_args(sys.argv[2:]).feats)
     else:
-        sys.exit('usage: python -m v3.data.bench2_sets build|inject')
+        sys.exit('usage: python -m v3.data.bench2_sets build|inject|inject-near --feats DIR')

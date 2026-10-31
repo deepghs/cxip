@@ -3,6 +3,7 @@ import tarfile
 
 import numpy as np
 import pandas as pd
+import pytest
 from PIL import Image
 
 from v3.data import bench2_sets as B
@@ -112,3 +113,35 @@ def test_write_set_roundtrip_list_columns(tmp_path):
     back = pd.read_parquet(tmp_path / 's' / 'index.parquet')
     assert list(back.characters.iloc[0]) == [] and (tmp_path / 's' / 'manifest.json').exists()
     assert list(back.columns[:len(B.COLUMNS)]) == B.COLUMNS
+
+
+def test_make_inject_near_writes_folders_and_own_manifest(tmp_path, monkeypatch):
+    rng = np.random.default_rng(0)
+    root = tmp_path / 'bench'
+    (root / 'inject').mkdir(parents=True)
+    (root / 'inject' / 'manifest.json').write_text('{}')          # existing inject manifest must be left alone
+    fdir = tmp_path / 'feats'
+    fdir.mkdir()
+    sets = {}
+    for s in B.INJECT_SETS:
+        lab = np.repeat(np.arange(6), 20)
+        df = pd.DataFrame(dict(sample_key=[f'{s}{i}' for i in range(len(lab))], label=lab,
+                               split=np.where(lab < 3, 'dev', 'test'), t_year=rng.uniform(2010, 2020, len(lab))))
+        f = rng.normal(size=(len(df), 8)) + 3 * np.eye(8)[lab]
+        perm = rng.permutation(len(df))                               # npz rows in another order: aligned by key
+        np.savez(fdir / f'bench2_{s}.npz', feats=f[perm].astype(np.float16),
+                 sample_key=df['sample_key'].values[perm].astype(str))
+        sets[f'bench2_{s}'] = df
+    monkeypatch.setattr(evalsets, 'load_index_set', lambda name: (sets[name], None))
+    man = B.make_inject_near(fdir, root=root)
+    assert (root / 'inject' / 'manifest.json').read_text() == '{}'
+    assert (root / 'inject' / 'manifest_near_style.json').exists()
+    for s in B.INJECT_SETS:
+        fo = pd.read_parquet(root / 'inject' / f'bench2_{s}_near_style.parquet')
+        rec = man['files'][f'bench2_{s}_near_style.parquet']
+        assert rec['folders'] == 6 and rec['injected'] == 6 == int(fo['injected'].sum())   # 20 * 5% = 1 per folder
+        lab_of = sets[f'bench2_{s}'].set_index('sample_key')['label']
+        inj = fo[fo['injected']]
+        assert (inj['sample_key'].map(lab_of) != inj['folder']).all()
+    with pytest.raises(SystemExit):
+        B.make_inject_near(fdir, root=root)

@@ -9,6 +9,7 @@
 然后对每份特征跑 v3.scripts.csip_full_eval (见 --print-cmds)。
 """
 import argparse
+import io
 import json
 import sys
 from pathlib import Path
@@ -29,15 +30,18 @@ from torchvision import transforms  # noqa: E402
 
 
 class Images(Dataset):
-    def __init__(self, paths):
+    """paths: 单图文件路径; read_bytes (可选): i -> 图片字节 (打包 tar 的集合, 如 bench2, 按偏移 pread)"""
+    def __init__(self, paths, read_bytes=None):
         self.paths = paths
+        self.read_bytes = read_bytes
         self.spatial = transforms.Compose([transforms.Resize(512), transforms.CenterCrop(512)])
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, i):
-        return torch.from_numpy(np.array(self.spatial(rgb_loader(self.paths[i])), copy=True)).permute(2, 0, 1)
+        src = io.BytesIO(self.read_bytes(i)) if self.read_bytes is not None else self.paths[i]
+        return torch.from_numpy(np.array(self.spatial(rgb_loader(src)), copy=True)).permute(2, 0, 1)
 
 
 def load_model():
@@ -67,8 +71,9 @@ def main():
         return
     model = model.cuda()
     for name in args.sets:
-        df, _ = load_set(name)
-        dl = DataLoader(Images(df['path'].tolist()), batch_size=args.batch_size, num_workers=16, pin_memory=True)
+        df, read = load_set(name)
+        rb = (lambda i: read(i, decode=False)) if 'tar' in df.columns else None      # 打包集合按偏移读字节
+        dl = DataLoader(Images(df['path'].tolist(), rb), batch_size=args.batch_size, num_workers=16, pin_memory=True)
         outs = []
         with torch.inference_mode():
             for i, x in enumerate(dl):
