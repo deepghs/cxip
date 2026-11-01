@@ -4,8 +4,11 @@ evaluate_set(name, df, models, split, ...) 在一个 B 集合 (按 split 过滤�
   ArtistHists (timestrata), 逐查询时间窗检索值 (retrieval.window_retrieval), 逐图年代误差 (dateest), 逐文件夹
   注入 AUROC (inject), 画师内 drift Spearman; 之后每次 bootstrap 抽样只是这些量的按画师加权和.
   所有模型共用同一个 draw_weights(A, n_boot, seed) 矩阵, 所以 'diff' 是配对差 (同一次重采样下 b - a).
-  直方图类指标的抽样走批量路径: W (chunk, A) @ pos (A, G*B) 得到每次抽样的加权直方图, 再交给
-  stratified_metrics (单 "画师" 的 ArtistHists), 不对每次抽样重做 (A, G, B) 的加权和.
+  直方图类指标的抽样走批量路径: 正对 (同画师) W·base (chunk, A) @ pos (A, G*B), 负对 (不同画师) 用乘积权重的
+  线性化 bootstrap.pair_draw_hists ((2W − 1)·base @ neg, 截到 0; 裁定 R22, 见 bootstrap 模块说明) 得到每次抽样的加权
+  直方图, 再交给 stratified_metrics (单 "画师" 的 ArtistHists), 不对每次抽样重做 (A, G, B) 的加权和.
+  W = 1 时抽样值与点估计相同. (R22 之前负对用 W·base 线性平均权重, 负对一侧指标的 CI 窄约 2 倍; results_v2 已被
+  results_v2n 取代.)
 输出: {model: {metric: {point, lo, hi, n_valid}}, 'diff': {f'{m}-vs-{ref}': {metric: {point, lo, hi, n_valid, p_gt0}}},
        'composition': {...}, 'inject': {kind: 状态}, 'clustering': {model: ...} (仅 split == 'dev'), 'reweight': {...}}.
 metric 键名见下方 "metric 键" 的说明 (固定). None / NaN 原样进 bootstrap.summarize, 由它丢弃并计入 n_valid.
@@ -110,7 +113,8 @@ def _tail(x: np.ndarray, b: int) -> float:
 
 def _strat_draws(h: T.ArtistHists, W: np.ndarray, base: np.ndarray, suffix: str = '', full: bool = True,
                  threshold: float | None = None, chunk_elems: int = 1 << 25):
-    """point + 每次抽样的 stratified_metrics 标量. W: (n_boot, A) 重数; 抽样权重 = W * base.
+    """point + 每次抽样的 stratified_metrics 标量. W: (n_boot, A) 重数; 正对抽样权重 = W * base,
+    负对 = bootstrap.pair_draw_hists(W, ·, base) (乘积权重的线性化, 截到 0; R22).
     每画师直方图只转一次 float64, 抽样按块做矩阵乘得到加权直方图, 再按单 "画师" 的 ArtistHists 调 stratified_metrics.
     内容指标 (ruling R14): cross_content_recall / same_char_fpr / same_copy_fpr 取默认阈值 threshold (score 单位,
     预测为正 = 所在箱及以上); stratified_metrics 在 all 组最佳阈值下的值改名为 '<键>@best'. threshold=None 时前者为 NaN.
@@ -141,7 +145,7 @@ def _strat_draws(h: T.ArtistHists, W: np.ndarray, base: np.ndarray, suffix: str 
     Wb = W * base
     step = max(1, chunk_elems // (GP * NB))
     for c0 in range(0, len(W), step):
-        P, N = Wb[c0:c0 + step] @ Hp, Wb[c0:c0 + step] @ Hn
+        P, N = Wb[c0:c0 + step] @ Hp, bootstrap.pair_draw_hists(W[c0:c0 + step], Hn, base)
         for d in range(len(P)):
             for k, v in one(P[d], N[d]).items():
                 draws[k][c0 + d] = v
@@ -193,15 +197,8 @@ def _summarize(point: dict, draws: dict, n_boot: int) -> dict:
 
 
 def _paired(pa: dict, da: dict, pb: dict, db: dict, n_boot: int) -> dict:
-    """b - a, 抽样是同一个 W 下的逐次差; 输出 summarize 的 {point, lo, hi, n_valid} 加 p_gt0"""
-    keys = [k for k in pa if k in pb]
-    pt = {k: pb[k] - pa[k] for k in keys}
-    dd = {k: db[k] - da[k] for k in keys}
-    out = _summarize(pt, dd, n_boot)
-    for k in keys:
-        v = dd[k][np.isfinite(dd[k])]
-        out[k]['p_gt0'] = float((v > 0).mean()) if len(v) else None
-    return out
+    """b - a, 抽样是同一个 W 下的逐次差; {point, lo, hi, n_valid, p_gt0} (bootstrap.paired_diff)"""
+    return bootstrap.paired_diff(pa, da, pb, db)
 
 
 # ----------------------------------------------------------------------------------------------- 单集合
@@ -276,7 +273,8 @@ def evaluate_set(name: str, df: pd.DataFrame, models: list[ModelFeats], split: s
     source == 'danbooru' (cols / 库) 的图对 (通用的跨来源能力; 原用于已取消的 B3-P1).
     hists_out: 若给出, 写入 {model: 按画师求和后的 ArtistHists} (供 threshold_transfer).
     boot_out: 若给出, 写入 W (本集合所有模型共用的 (n_boot, A) 抽样矩阵), pos / neg: {model: (A, N_BINS) int64}
-    = 每画师 all 组正对 / 负对直方图 (负对在两侧画师各计一次), 供 threshold_transfer 做 G2 的 bootstrap.
+    = 每画师 all 组正对 / 负对直方图 (负对在两侧画师各计一次), 供 threshold_transfer 做 G2 的 bootstrap
+    (负对抽样同样用 bootstrap.pair_draw_hists).
     A == 0 时 boot_out 不写."""
     for m in models:
         assert m.name not in RESERVED, f'model name {m.name!r} is reserved'
@@ -448,7 +446,8 @@ def _g2_max_loss(curves: dict) -> float | None:
 def g2_loss_draws(sets: dict, boot: dict | None, model: str, g2_sets=G2_SETS, chunk: int = 64):
     """G2 的 max_cross_f1_loss 的点估计和按画师 bootstrap 抽样值. 返回 (point, draws 或 None, 被重采样的集合).
     sets: {集合: {模型: ArtistHists}} (按画师求和后的单行版本即可); boot: {集合: evaluate_set 的 boot_out}.
-    G2 集合中 boot 里有该模型每画师直方图的 (B1 / B2) 每次抽样按 W[b] 重新加权求和 (负对 / 2), 其余 (csip_eval_public)
+    G2 集合中 boot 里有该模型每画师直方图的 (B1 / B2) 每次抽样重新加权求和 (正对 W[b]; 负对 bootstrap.pair_draw_hists,
+    即乘积权重的线性化 (2W[b] − 1), 截到 0, 再 / 2; R22), 其余 (csip_eval_public)
     固定为点估计的曲线, 只算一次. 每次抽样: 各集合 T.curve_metrics -> pairwise.threshold_drift -> G2 集合之间的最大损失,
     与点估计完全同一条计算路径. 某次抽样里某个集合的曲线为空 (无正 / 负对) 时该次为 NaN. 各集合的 W 行数须相同."""
     curves = {}
@@ -466,10 +465,11 @@ def g2_loss_draws(sets: dict, boot: dict | None, model: str, g2_sets=G2_SETS, ch
     assert len(n_boot) == 1, f'W of {bs} differ in n_boot: {n_boot}'
     nb = n_boot.pop()
     mats = {s: (boot[s]['W'].astype(np.float64), boot[s]['pos'][model].astype(np.float64),
-                boot[s]['neg'][model].astype(np.float64) / 2) for s in bs}
+                boot[s]['neg'][model].astype(np.float64)) for s in bs}
     draws = np.full(nb, np.nan)
     for c0 in range(0, nb, chunk):
-        P = {s: (W[c0:c0 + chunk] @ Hp, W[c0:c0 + chunk] @ Hn) for s, (W, Hp, Hn) in mats.items()}
+        P = {s: (W[c0:c0 + chunk] @ Hp, bootstrap.pair_draw_hists(W[c0:c0 + chunk], Hn) / 2)
+             for s, (W, Hp, Hn) in mats.items()}
         for d in range(min(chunk, nb - c0)):
             cs = dict(curves)
             for s in bs:
@@ -481,15 +481,8 @@ def g2_loss_draws(sets: dict, boot: dict | None, model: str, g2_sets=G2_SETS, ch
 
 
 def _diff_entry(pa, da, pb, db) -> dict:
-    """b - a 的配对差 (抽样为同一组 W 下的逐次差): {point, lo, hi, n_valid, p_gt0}"""
-    pt = (pb - pa) if pa is not None and pb is not None else None
-    if da is None or db is None or len(da) != len(db):
-        return dict(point=pt, lo=None, hi=None, n_valid=0, p_gt0=None)
-    dd = db - da
-    out = bootstrap.summarize({'v': pt}, [{'v': x} for x in dd])['v']
-    v = dd[np.isfinite(dd)]
-    out['p_gt0'] = float((v > 0).mean()) if len(v) else None
-    return out
+    """单个标量的 b - a 配对差 (抽样为同一组 W 下的逐次差): {point, lo, hi, n_valid, p_gt0} (bootstrap.paired_diff)"""
+    return bootstrap.paired_diff({'v': pa}, {'v': da}, {'v': pb}, {'v': db})['v']
 
 
 def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 1e-3, g2_sets=G2_SETS,
@@ -537,11 +530,7 @@ def threshold_transfer(sets: dict, thresholds: dict | None = None, fpr: float = 
         if res['drift'] and 'max_cross_f1_loss' in res['drift']:      # 全部集合 (含 legacy) 的最大值; G2 口径见下
             res['drift']['max_cross_f1_loss_all_sets'] = res['drift'].pop('max_cross_f1_loss')
         g2 = [s for s in g2_sets if s in curves]
-        loss = (res['drift'] or {}).get('cross_f1_loss', {})
-        g2_loss = [v for k, v in loss.items() if k.split('->')[0] in g2 and k.split('->')[1] in g2]
-        point = float(max(g2_loss)) if g2_loss else None
-        p, dr, bs = g2_loss_draws(sets, boot, m, g2_sets)
-        assert (p is None) == (point is None) and (p is None or abs(p - point) <= 1e-9), (m, p, point)
+        point, dr, bs = g2_loss_draws(sets, boot, m, g2_sets)    # 点估计 = G2 集合之间逐对损失的最大值
         res['max_cross_f1_loss'] = (bootstrap.summarize({'v': point}, [{'v': x} for x in dr])['v'] if dr is not None
                                     else dict(point=point, lo=None, hi=None, n_valid=0))
         res['max_cross_f1_loss_point'] = point

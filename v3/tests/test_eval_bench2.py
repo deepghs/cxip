@@ -380,7 +380,8 @@ def test_g2_bootstrap_ci_paired_diff_and_brute_force_draw(tmp_path):
     d = tt['diff']['b-vs-a']['max_cross_f1_loss']
     assert d['point'] == pytest.approx(tt['b']['max_cross_f1_loss']['point'] - tt['a']['max_cross_f1_loss']['point'])
     assert 0.0 <= d['p_gt0'] <= 1.0 and d['n_valid'] == 40 and d['lo'] <= d['hi']
-    # brute force: draw k = per-artist 'all' histograms of B1 / B2 weighted by W[k]; csip_eval_public fixed
+    # brute force: draw k = per-artist 'all' histograms of B1 / B2; positives weighted by W[k], negatives by the
+    # linearised product weight (2 W[k] - 1) (R22: pair (a, a') -> k_a + k_a' - 1), clipped at 0; csip_eval_public fixed
     pt, draws, bs = B2.g2_loss_draws(hs, boot, 'b', B2.G2_SETS)
     assert bs == ['bench2_b1', 'bench2_b2']
     assert pt == tt['b']['max_cross_f1_loss_point'] and draws.shape == (40,)
@@ -388,7 +389,8 @@ def test_g2_bootstrap_ci_paired_diff_and_brute_force_draw(tmp_path):
         cs = {}
         for s in ('bench2_b1', 'bench2_b2'):
             w = boot[s]['W'][k].astype(float)
-            cs[s] = T.curve_metrics(w @ boot[s]['pos']['b'], w @ boot[s]['neg']['b'] / 2, 10.0, -5.0)
+            cs[s] = T.curve_metrics(w @ boot[s]['pos']['b'], np.maximum((2 * w - 1) @ boot[s]['neg']['b'], 0) / 2,
+                                    10.0, -5.0)
         hp = hs['csip_eval_public']['b']
         cs['csip_eval_public'] = T.curve_metrics(hp.pos[0, T.POS_GROUPS.index('all')].astype(float),
                                                  hp.neg[0, 0].astype(float) / 2, 10.0, -5.0)
@@ -411,3 +413,83 @@ def test_cli_refuses_to_overwrite_outputs(tmp_path):
     with pytest.raises(SystemExit):
         bench2_eval.main(['--model', 'a', str(tmp_path), '1', '0', '0', '--out', str(out)])
     assert out.read_text() == '{}'
+
+
+# ---------------------------------------------------------------- Task 16 fix round 1 (ruling R22)
+def _hist(seed=0):
+    df, f = _sep_set(seed=seed)
+    f = f + 1.5 * np.random.default_rng(seed + 5).standard_normal(f.shape)      # overlapping artists: pr_auc < 1
+    lab = B2._codes(df['label'].to_numpy())
+    chars = T.tag_ids(B2._tag_lists(df, 'characters'))
+    copys = T.tag_ids(B2._tag_lists(df, 'copyrights'))
+    return T.artist_histograms(f, lab, df['t_year'].to_numpy(), df['family'].to_numpy(), chars, copys, 10.0, -5.0,
+                               day=B2._codes(df['date_day'].to_numpy()))
+
+
+def _same(a, b):
+    return (np.isnan(a) and np.isnan(b)) or a == b
+
+
+def test_strat_draws_all_ones_W_reproduce_point_bitwise():
+    h = _hist()
+    A = h.pos.shape[0]
+    ones = np.ones((3, A), dtype=np.int32)
+    pt, dr = B2._strat_draws(h, ones, np.ones(A), threshold=0.3)
+    for k, v in pt.items():
+        assert all(_same(x, v) for x in dr[k]), k
+    rw = np.random.default_rng(1).random(A) + 0.5                       # reweight base: same to rounding
+    pt, dr = B2._strat_draws(h, ones, rw, suffix='/reweighted', full=False)
+    for k, v in pt.items():
+        assert dr[k] == pytest.approx(np.full(3, v), rel=1e-12, abs=1e-15, nan_ok=True), k
+
+
+def test_strat_draw_negatives_use_linearised_product_weight():
+    h = _hist()
+    A, GP, NB = h.pos.shape
+    W = B2.bootstrap.draw_weights(A, 5, 3)
+    assert h.pos[:, T.POS_GROUPS.index('cross_content')].sum() > 0 and h.neg[:, T.NEG_GROUPS.index('same_char')].sum() > 0
+    base = np.ones(A)
+    pt, dr = B2._strat_draws(h, W, base, threshold=0.3)
+    k = 2
+    w = W[k].astype(np.float64)
+    p = w @ h.pos.reshape(A, -1).astype(np.float64)
+    n = np.maximum((2 * w - 1) @ h.neg.reshape(A, -1).astype(np.float64), 0)
+    sm = T.stratified_metrics(T.ArtistHists(p.reshape(1, GP, NB), n.reshape(1, -1, NB), h.scale, h.bias))
+    assert dr['pr_auc/all'][k] == pytest.approx(sm['all']['pr_auc'], abs=1e-12)
+    assert dr['pr_auc/<1y_xday'][k] == pytest.approx(sm['<1y_xday']['pr_auc'], abs=1e-12)
+    assert dr['same_char_fpr@best'][k] == pytest.approx(sm['same_char_fpr'], abs=1e-12)
+    mf = B2._matched_fpr(p.reshape(GP, NB), n.reshape(-1, NB))
+    for key, v in mf.items():
+        assert _same(dr[key][k], v) or dr[key][k] == pytest.approx(v, abs=1e-12), key
+    # old linear weight W @ neg would give a different draw
+    n_old = w @ h.neg.reshape(A, -1).astype(np.float64)
+    sm_old = T.stratified_metrics(T.ArtistHists(p.reshape(1, GP, NB), n_old.reshape(1, -1, NB), h.scale, h.bias))
+    assert sm_old['all']['pr_auc'] != pytest.approx(dr['pr_auc/all'][k], abs=1e-9)
+
+
+def test_g2_draws_all_ones_W_reproduce_point_and_no_vacuous_assert(tmp_path):
+    hs, boot = _g2_inputs(tmp_path, n_boot=4)
+    for s in boot:
+        boot[s]['W'] = np.ones_like(boot[s]['W'])
+    for m in ('a', 'b'):
+        pt, draws, bs = B2.g2_loss_draws(hs, boot, m, B2.G2_SETS)
+        assert bs == ['bench2_b1', 'bench2_b2'] and (draws == pt).all()
+    import inspect
+    assert '1e-9' not in inspect.getsource(B2.threshold_transfer)
+
+
+def test_shared_paired_diff_helper_used():
+    import inspect
+    assert 'bootstrap.paired_diff' in inspect.getsource(B2._paired)
+    assert 'bootstrap.paired_diff' in inspect.getsource(B2._diff_entry)
+    d = B2._diff_entry(1.0, np.array([1.0, 2.0]), 1.5, np.array([2.0, 1.0]))
+    assert d['point'] == 0.5 and d['n_valid'] == 2 and d['p_gt0'] == 0.5
+
+
+def test_markdown_run_level_header_claims_ci_only_for_dict():
+    from v3.scripts.bench2_eval import markdown
+    new = dict(models=['a'], split='test', sets={},
+               threshold_transfer={'a': dict(max_cross_f1_loss=dict(point=0.05, lo=0.04, hi=0.06, n_valid=10))})
+    old = dict(models=['a'], split='test', sets={}, threshold_transfer={'a': dict(max_cross_f1_loss=0.05)})
+    assert 'G2 CI = artist bootstrap' in markdown(new)
+    assert 'G2 CI = artist bootstrap' not in markdown(old) and 'no CI' in markdown(old)

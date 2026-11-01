@@ -5,7 +5,7 @@ markdown 全). 每个 B 集合一张主表 (各模型 point [lo, hi] + 相对第
 
 阈值迁移表: 在指定集合之间取 threshold_transfer[模型]['drift']['cross_f1_loss'] 的逐对最大值 (可去掉无效集合),
 并列出各集合的默认阈值 F1 / best F1 / 默认阈值下的 FPR. g2_table: G2 的 max_cross_f1_loss (新 JSON 带按画师 bootstrap 的
-CI 和相对第一个模型的配对差; 旧 JSON 只有点估计).
+CI 和相对第一个模型的配对差; 旧 JSON 的值含 B3-P2, 只打警告行, 见 --g2fix).
 
 G2 修正 (--g2fix, 只用于 Task 16 之前的旧 JSON): 不重跑评测, 用已有 JSON 里逐对的 cross_f1_loss 在 G2 集合
 (默认 bench2.G2_SETS) 之间重算 max_cross_f1_loss, 去掉无效的 B3 集合 (报告 §6.1), 按 bench2_eval 的 markdown 格式写新文件.
@@ -114,26 +114,23 @@ def transfer_table(res: dict, sets) -> str:
     return '\n'.join(out)
 
 
-def _cell_p(v, signed=False) -> str:
-    s = _cell(v, signed)
-    if v and v.get('point') is not None and v.get('p_gt0') is not None:
-        s += f' p>0={v["p_gt0"]:.2f}'
-    return s
+G2_OLD_WARNING = '旧 JSON：含 B3-P2，已作废，见 g2fix'
 
 
 def g2_table(res: dict) -> str:
     """G2 的 max_cross_f1_loss: 各模型 point [lo, hi] + 相对第一个模型的配对差 (p>0 = 抽样中差 > 0 的比例);
-    旧 JSON 的浮点值只显示点估计"""
+    行格式与 bench2_eval.markdown 的运行级行相同 (共用 run_level_cells). 旧 JSON (浮点值, Task 16 之前) 的值含 B3-P2,
+    不当 G2 展示, 只打一行警告 (修正值用 --g2fix)"""
+    from v3.scripts.bench2_eval import has_ci, run_level_cells
     ms = res['models']
     ref = ms[0]
     tt = res.get('threshold_transfer', {})
-    stat = lambda v: v if v is None or isinstance(v, dict) else dict(point=float(v))
-    vals = [stat((tt.get(m) or {}).get('max_cross_f1_loss')) for m in ms]
     head = [_name(m) for m in ms] + [f'{_name(m)} − {_name(ref)}' for m in ms[1:]]
-    row = [_cell(v) for v in vals]
-    row += [_cell_p((tt.get('diff', {}).get(f'{m}-vs-{ref}') or {}).get('max_cross_f1_loss'), True) for m in ms[1:]]
+    label = f'| G2 最大跨集 F1 损失 ({res["split"]}) | '
+    if not has_ci(tt, ms):
+        return f'{label}{G2_OLD_WARNING} |'
     return '\n'.join(['| 指标 | ' + ' | '.join(head) + ' |', '|' + '-|' * (len(head) + 1),
-                      f'| G2 最大跨集 F1 损失 ({res["split"]}) | ' + ' | '.join(row) + ' |'])
+                      label + ' | '.join(run_level_cells(tt, ms, 'max_cross_f1_loss')) + ' |'])
 
 
 def regate_g2(res: dict, g2_sets=None) -> dict:

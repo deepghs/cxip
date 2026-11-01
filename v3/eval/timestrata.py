@@ -5,9 +5,11 @@
              (两张图的角色标签、作品标签都不重叠; 没有传入任何内容标签时该组为空), <1y_xday (<1y 中两张图的原发日
              day 不同的对 (裁定 R20: 用校正后的原发日 date_day, 不是上传日); 没有传入 day 时该组为空);
   neg[a, g]: 画师 a 参与的不同画师负样本对, g = all / same_char / same_copy (有共同角色 / 作品标签).
-             每个负对在两侧画师各计一次 (所以聚合时 Σ w·neg / 2).
+             每个负对在两侧画师各计一次 (所以固定权重 base 下的聚合为 Σ base·neg / 2, 每对权重 (base_a + base_a') / 2).
 同一作品族 (family) 的对既不算正也不算负; 自身对排除. 任何 PR 类指标 / 每次 bootstrap 抽样都是这些直方图的
-加权和 (权重 = 每画师被抽中的次数或总体重加权), 不需要再碰图片.
+加权和, 不需要再碰图片. bootstrap 抽样 (裁定 R22): 正对 (同画师) 权重 = 重数 k_a × base_a; 负对 (不同画师) 的真实
+重采样权重是乘积 k_a·k_a', 用它的线性化 (Hájek): Σ (2k − 1)·base·neg / 2 (base = 1 时每对 k_a + k_a' − 1),
+截到 0 — 见 bootstrap.pair_draw_hists. 不能把 W·base 同时用于正负两侧 (负对一侧的 SD 会被低估一半).
 """
 from __future__ import annotations
 
@@ -211,6 +213,8 @@ def _weighted_sum(x: np.ndarray, w: np.ndarray, block: int = 64) -> np.ndarray:
 
 def stratified_metrics(h: ArtistHists, w: np.ndarray | None = None) -> dict:
     """键为 POS_GROUPS 中的每一组: curve_metrics(Σ w·pos[:, g], Σ w·neg[:, all] / 2), 空则 None.
+    w 是固定 (点估计) 的画师权重, 同时作用于正负两侧; bootstrap 抽样不要把重数直接当 w 传进来 (负对须用乘积权重的
+    线性化, 见模块说明 / bootstrap.pair_draw_hists), 而是像 bench2._strat_draws 那样先求好单 "画师" 的抽样直方图.
     另有 cross_content_recall / same_char_fpr / same_copy_fpr (全部 None 若 all 组为空或分母为 0),
     都在 all 组的最佳阈值下计算 (预测为正 = score >= best_threshold)."""
     A = h.pos.shape[0]

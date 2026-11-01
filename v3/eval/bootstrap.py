@@ -5,6 +5,14 @@ w 为长度 n_artists 的权重向量 (重数 x 可选基础权重, 可以含 0)
 `artist_bootstrap` 给单模型指标的 CI, `paired_bootstrap` 对 b - a 在同一次重采样下做差 (配对),
 `population_weights` 把评测集的画师分布 (跨度 x 出道年份) 重加权到参考总体分布.
 抽样结果为 None / 非有限值 (NaN, inf) 的丢弃并计入 n_valid, 不让 NaN 进入分位数.
+
+画师对 (pair) 统计量的抽样权重 (裁定 R22): 同画师正对 (a, a) 的真实重采样权重是 k_a (乘基础权重), 线性, 照用 W·base.
+不同画师负对 (a, a') 的真实重采样权重是乘积 k_a·k_a'; 旧做法给 (k_a + k_a') / 2 (线性平均), 它的偏差项是乘积
+线性化 (k_a − 1) + (k_a' − 1) 的一半, 所以负对一侧统计量的 bootstrap SD 被低估一半 (CI 窄约 2 倍). 现在负对用乘积的
+线性化 (Hájek) 权重 `pair_draw_coef`: 对 "每对在两侧画师各计一次" 的每画师直方图 Hn, 单侧计数的抽样直方图 =
+((W − 1)·base) @ Hn + (base @ Hn) / 2 = ((2W − 1)·base) @ Hn / 2; base = 1 时每对权重 = k_a + k_a' − 1.
+W = 1 时与点估计完全相同. 单个箱可能为负, `pair_draw_hists` 截到 0.
+`paired_diff` 是所有配对差 (b − a, 同一个 W 下逐次相减) 的共用汇总: {point, lo, hi, n_valid, p_gt0}.
 """
 from __future__ import annotations
 
@@ -60,6 +68,40 @@ def summarize(point: dict, draws: list[dict]) -> dict[str, dict]:
     return out
 
 
+def pair_draw_coef(W: np.ndarray, base_w: np.ndarray | None = None) -> np.ndarray:
+    """不同画师对的抽样系数 (2W − 1)·base (n_boot, A): 对两侧各计一次的每画师直方图 H, coef @ H 是两侧计数口径的
+    抽样直方图 (/ 2 得单侧计数); 每对 (a, a') 的权重 = 乘积 k_a·k_a' 的线性化 (base = 1 时 k_a + k_a' − 1). W = 1 时 = base"""
+    W = np.asarray(W, dtype=np.float64)
+    base = _base(base_w, W.shape[-1])
+    return (2.0 * W - 1.0) * base
+
+
+def pair_draw_hists(W: np.ndarray, H: np.ndarray, base_w: np.ndarray | None = None) -> np.ndarray:
+    """max(pair_draw_coef(W, base) @ H, 0): 不同画师对的抽样直方图 (两侧计数口径, 与 base @ H 同一口径).
+    线性化权重可为负 (k = 0 的画师), 个别箱会 < 0, 截到 0 后尾部 / 曲线都单调、有限"""
+    return np.maximum(pair_draw_coef(W, base_w) @ H, 0.0)
+
+
+def paired_diff(pa: dict, da: dict, pb: dict, db: dict) -> dict:
+    """b − a 的配对差. pa / pb: {键: 点估计 (可为 None)}; da / db: {键: (n_boot,) 同一组 W 下的抽样值 (或 None)}.
+    键 = pa 与 pb 共有的键. 输出每键 {point, lo, hi, n_valid, p_gt0}; 任一侧点估计无效则 point = None;
+    任一侧没有抽样 (或长度不同) 则 lo = hi = None, n_valid = 0, p_gt0 = None"""
+    out = {}
+    for k in [k for k in pa if k in pb]:
+        a, b = pa[k], pb[k]
+        pt = (float(b) - float(a)) if _valid(a) and _valid(b) else None
+        xa, xb = da.get(k), db.get(k)
+        if xa is None or xb is None or len(xa) != len(xb):
+            out[k] = dict(point=pt, lo=None, hi=None, n_valid=0, p_gt0=None)
+            continue
+        dd = np.asarray(xb, dtype=np.float64) - np.asarray(xa, dtype=np.float64)
+        v = dd[np.isfinite(dd)]
+        r = summarize({'v': pt}, [{'v': x} for x in dd])['v']
+        r['p_gt0'] = float((v > 0).mean()) if len(v) else None
+        out[k] = r
+    return out
+
+
 def artist_bootstrap(stat: Callable[[np.ndarray], dict], n_artists: int, n_boot: int = 1000, seed: int = 0,
                      base_w: np.ndarray | None = None) -> dict:
     """point = stat(base_w 或全 1); 每次抽样 stat(W[b] * base_w)"""
@@ -75,20 +117,16 @@ def paired_bootstrap(stat_a: Callable[[np.ndarray], dict], stat_b: Callable[[np.
     base = _base(base_w, n_artists)
     W = draw_weights(n_artists, n_boot, seed)
 
-    def diff(da: dict, db: dict) -> dict:
-        return {k: (db[k] - da[k]) if _valid(da.get(k)) and _valid(db.get(k)) else None
-                for k in _keys(da, db)}
-
-    pt = diff(stat_a(base.copy()), stat_b(base.copy()))
-    draws = []
+    pa, pb = stat_a(base.copy()), stat_b(base.copy())
+    keys = _keys(pa, pb)
+    da, db = {k: np.full(n_boot, np.nan) for k in keys}, {k: np.full(n_boot, np.nan) for k in keys}
     for b in range(n_boot):
         w = W[b] * base
-        draws.append(diff(stat_a(w), stat_b(w)))
-    out = summarize(pt, draws)
-    for k, v in out.items():
-        vals = np.array([d[k] for d in draws if _valid(d.get(k))], dtype=np.float64)
-        v['p_gt0'] = float((vals > 0).mean()) if len(vals) else None
-    return out
+        ra, rb = stat_a(w), stat_b(w)
+        for k in keys:
+            if _valid(ra.get(k)) and _valid(rb.get(k)):
+                da[k][b], db[k][b] = ra[k], rb[k]
+    return paired_diff({k: pa.get(k) for k in keys}, da, {k: pb.get(k) for k in keys}, db)
 
 
 def population_weights(span: np.ndarray, debut_year: np.ndarray, ref_span: np.ndarray, ref_year: np.ndarray,

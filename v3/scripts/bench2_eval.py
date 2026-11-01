@@ -5,7 +5,8 @@
       [--split dev|test] [--n-boot 1000] [--sets bench2_b1 bench2_b2] [--g2-sets ...] --out res.json [--md res.md]
 第一个 --model 是参照模型 (diff 列 = 其他模型 - 参照). 某集合缺特征文件 (FEATS_DIR/<集合>.npz) 时该集合跳过并注明.
 markdown: 每个 B 集合一张表, 行 = 主指标, 列 = 各模型 (point [lo, hi]) + 每个非参照模型的 diff 列;
-最后一张表是运行级的阈值迁移指标 (G2 的 max_cross_f1_loss, 按画师 bootstrap 的 CI + 配对差; 旧 JSON 只有点估计).
+最后一张表是运行级的阈值迁移指标 (G2 的 max_cross_f1_loss, 按画师 bootstrap 的 CI + 配对差; 旧 JSON 只有点估计,
+表头相应注明无 CI).
 """
 from __future__ import annotations
 
@@ -51,6 +52,25 @@ def _as_stat(v) -> dict | None:
     return dict(point=float(v))
 
 
+def run_level_cells(tt: dict, names: list, k: str) -> list[str]:
+    """运行级指标 k 的一行: 各模型 point [lo, hi] + 每个非参照模型相对 names[0] 的配对差 (p>0=...).
+    旧 JSON (浮点, 无 'diff') 的差列只给点估计之差. bench2_tables.g2_table 共用此函数, 两处格式一致"""
+    ref = names[0]
+    vals = [_as_stat(tt.get(m, {}).get(k)) for m in names]
+    row = [_cell(v) for v in vals]
+    for m, v in zip(names[1:], vals[1:]):
+        d = tt.get('diff', {}).get(f'{m}-vs-{ref}', {}).get(k)
+        if d is None and v and vals[0] and v.get('point') is not None and vals[0].get('point') is not None:
+            d = dict(point=v['point'] - vals[0]['point'])               # 旧 JSON: 只有点估计之差
+        row.append(_cell(d, signed=True))
+    return row
+
+
+def has_ci(tt: dict, names: list, k: str = 'max_cross_f1_loss') -> bool:
+    """新 JSON: 运行级指标是 {point, lo, hi, n_valid} (按画师 bootstrap); 旧 JSON 是浮点数"""
+    return any(isinstance(tt.get(m, {}).get(k), dict) for m in names)
+
+
 def markdown(res: dict) -> str:
     names = res['models']
     ref = names[0]
@@ -70,17 +90,12 @@ def markdown(res: dict) -> str:
         lines.append('')
     tt = res.get('threshold_transfer', {})
     if tt:
-        lines += ['### threshold transfer (run level; G2 CI = artist bootstrap of B1 / B2, csip_eval_public fixed)', '',
+        note = ('G2 CI = artist bootstrap of B1 / B2, csip_eval_public fixed' if has_ci(tt, names)
+                else 'old JSON: point estimates only, no CI')
+        lines += [f'### threshold transfer (run level; {note})', '',
                   '| metric | ' + ' | '.join(head) + ' |', '|' + '-|' * (len(head) + 1)]
         for k in RUN_LEVEL:
-            vals = [_as_stat(tt.get(m, {}).get(k)) for m in names]
-            row = [_cell(v) for v in vals]
-            for m, v in zip(names[1:], vals[1:]):
-                d = tt.get('diff', {}).get(f'{m}-vs-{ref}', {}).get(k)
-                if d is None and v and vals[0] and v.get('point') is not None and vals[0].get('point') is not None:
-                    d = dict(point=v['point'] - vals[0]['point'])               # 旧 JSON: 只有点估计之差
-                row.append(_cell(d, signed=True))
-            lines.append(f'| {k} | ' + ' | '.join(row) + ' |')
+            lines.append(f'| {k} | ' + ' | '.join(run_level_cells(tt, names, k)) + ' |')
         lines.append('')
     if res.get('skipped'):
         lines.append('skipped: ' + '; '.join(f'{k} ({v})' for k, v in res['skipped'].items()))

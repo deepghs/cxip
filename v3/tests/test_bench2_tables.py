@@ -73,9 +73,19 @@ def test_g2_table_with_ci_and_paired_diff():
     assert '| 指标 | v3 发布版 | Kaloscope | Kaloscope − v3 发布版 |' in md
     assert ('| G2 最大跨集 F1 损失 (test) | 0.0770 [0.0500, 0.110] | 0.0580 [0.0400, 0.0800] | '
             '-0.0190 [-0.0400, +0.0030] p>0=0.04 |') in md
-    # old JSON (float, no CI) still renders
-    old = dict(split='dev', models=['a'], threshold_transfer={'a': dict(max_cross_f1_loss=0.05)})
-    assert '| G2 最大跨集 F1 损失 (dev) | 0.0500 |' in g2_table(old)
+    # old JSON (float, contaminated by B3-P2): warning line, no value presented as G2
+    old = dict(split='dev', models=['a', 'b'], threshold_transfer={'a': dict(max_cross_f1_loss=0.05),
+                                                                   'b': dict(max_cross_f1_loss=0.07)})
+    md = g2_table(old)
+    assert '旧 JSON：含 B3-P2，已作废，见 g2fix' in md and '0.0500' not in md and '0.0700' not in md
+    # diff column identical to bench2_eval.markdown's run-level row
+    from v3.scripts.bench2_eval import markdown
+    row = next(l for l in markdown(dict(res, sets={})).splitlines() if l.startswith('| max_cross_f1_loss |'))
+    assert row.split(' | ', 1)[1] == md_row_tail(g2_table(res))
+
+
+def md_row_tail(md):
+    return next(l for l in md.splitlines() if l.startswith('| G2 ')).split(' | ', 1)[1]
 
 
 def test_regate_g2_skips_diff_entry():
