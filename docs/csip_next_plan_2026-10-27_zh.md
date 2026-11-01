@@ -259,8 +259,8 @@ Danbooru2026 + Pixiv 数据 (原发日期校正、作品族、画法标签)
 | B3 非 Danbooru 来源 **[已取消]** | B3-P1：B1 画师在 Pixiv 上、Danbooru 没有的作品 (493 个画师，约 7 千个作品)，查询用 Pixiv 图、库用 Danbooru 图，画师相同、只换来源；B3-P2：只在 Pixiv 的账号中留出约 300 个 (≥30 个作品)，Kaloscope 与 v3 都没见过；csip_eval_public | 跨来源阈值迁移；B3-P2 也是与 Kaloscope 的第二个公平对比集 |
 | 旧集合 | test100_0918、csip_eval_public、csip_unseen_v1 | 与 v1-v3 和 Kaloscope 的历史对比 |
 
-- v4 训练集排除：B1 的 798 个画师、csip_eval_public 的画师、B2 的画师、B3-P2 的 Pixiv 账号，以及这些画师对应的 Pixiv 账号 (与 v3 的排除口径一致，并扩到 B2 / B3)。
-- B1 按画师划成 dev / test / sealed (约 300 / 250 / 250，按职业跨度分层)；test100_0918 的 100 人全部放进 test，保持与旧结果可比。B2、B3-P2 同样划 dev / test / sealed。
+- v4 训练集排除：B1 的 798 个画师、csip_eval_public 的画师、B2 的画师、B3-P2 的 Pixiv 账号 (**[已取消]**)，以及这些画师对应的 Pixiv 账号 (**[已取消]**) (与 v3 的排除口径一致，并扩到 B2 / B3 (B3 **[已取消]**))。
+- B1 按画师划成 dev / test / sealed (约 300 / 250 / 250，按职业跨度分层)；test100_0918 的 100 人全部放进 test，保持与旧结果可比。B2、B3-P2 (B3-P2 **[已取消]**) 同样划 dev / test / sealed。
 - 对比口径：v4 vs v3 在 B1 上判 (两者都没见过这些画师)；v4 vs Kaloscope 在 B2 / B3-P2 (B3-P2 **[已取消]**) 上判 (三者都没见过)，并报告重加权后的分数；Kaloscope 在 B1 上的分数照列，但注明 "训练中见过"。
 
 ### 5.3 指标
