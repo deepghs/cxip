@@ -2,7 +2,8 @@
 
 对每个画师 a 保存两组 cos 直方图 (cos 空间 [-1, 1] 上 N_BINS 个等宽箱):
   pos[a, g]: 画师 a 的同画师正样本对, g = 原发日期差 |Δt| 分层 (<1y / 1-3y / 3-6y / >=6y), all, cross_content
-             (两张图的角色标签、作品标签都不重叠; 没有传入任何内容标签时该组为空);
+             (两张图的角色标签、作品标签都不重叠; 没有传入任何内容标签时该组为空), <1y_xday (<1y 中两张图的原发日
+             day 不同的对 (裁定 R20: 用校正后的原发日 date_day, 不是上传日); 没有传入 day 时该组为空);
   neg[a, g]: 画师 a 参与的不同画师负样本对, g = all / same_char / same_copy (有共同角色 / 作品标签).
              每个负对在两侧画师各计一次 (所以聚合时 Σ w·neg / 2).
 同一作品族 (family) 的对既不算正也不算负; 自身对排除. 任何 PR 类指标 / 每次 bootstrap 抽样都是这些直方图的
@@ -21,11 +22,12 @@ from v3.eval.pairwise import _bin, _curves_from_counts, _normalize, _summarize, 
 
 STRATA = ('<1y', '1-3y', '3-6y', '>=6y')
 EDGES = (1.0, 3.0, 6.0)
-POS_GROUPS = STRATA + ('all', 'cross_content')
+# '<1y_xday' 放在末尾, 已有各组的下标不变
+POS_GROUPS = STRATA + ('all', 'cross_content', '<1y_xday')
 NEG_GROUPS = ('all', 'same_char', 'same_copy')
 N_BINS = 1 << 14
 
-_P_ALL, _P_CROSS = POS_GROUPS.index('all'), POS_GROUPS.index('cross_content')
+_P_ALL, _P_CROSS, _P_XDAY = POS_GROUPS.index('all'), POS_GROUPS.index('cross_content'), POS_GROUPS.index('<1y_xday')
 _N_CHAR, _N_COPY = NEG_GROUPS.index('same_char'), NEG_GROUPS.index('same_copy')
 
 
@@ -82,10 +84,12 @@ def _tags(x, n, k_default, device):
 
 @torch.no_grad()
 def artist_histograms(feats, labels, t_year, family, chars=None, copys=None, scale=1.0, bias=0.0, rows=None, cols=None,
-                      chunk=2048, device='cpu') -> ArtistHists:
+                      chunk=2048, device='cpu', day=None) -> ArtistHists:
     """rows × cols 的所有图对 (布尔掩码, 默认全部) 的每画师直方图. 特征先 (转 float32 后) L2 归一化.
-    rows 与 cols 都为全部时只计 i < j; 否则计 rows 中的 i 与 cols 中的 j 的全部 (i, j) 对 (i != j), 例如 B3-P1 用
-    rows = Pixiv 查询, cols = Danbooru 库. labels 为 0..A-1 的连续整数. t_year 为 NaN 的正对只进 all / cross_content."""
+    rows 与 cols 都为全部时只计 i < j; 否则计 rows 中的 i 与 cols 中的 j 的全部 (i, j) 对 (i != j), 例如跨来源集合用
+    rows = 一个来源的查询, cols = 另一来源的库. labels 为 0..A-1 的连续整数. t_year 为 NaN 的正对只进 all / cross_content.
+    day: 可选的 (N,) 整数原发日编码 (< 0 = 未知); 给出时 <1y 层中两图 day 都已知且不同的对另计入 '<1y_xday'
+    (同一遍扫描, 不另跑); 有一侧 day 未知的对不进 '<1y_xday'."""
     n = len(labels)
     dev = torch.device(device)
     z = _normalize(feats).to(dev)
@@ -93,6 +97,8 @@ def artist_histograms(feats, labels, t_year, family, chars=None, copys=None, sca
     fam = torch.as_tensor(np.asarray(family), dtype=torch.int64, device=dev)
     t = torch.as_tensor(np.asarray(t_year), dtype=torch.float64, device=dev)
     chars_t, copys_t = _tags(chars, n, 4, dev), _tags(copys, n, 4, dev)
+    day_t = None if day is None else torch.as_tensor(np.asarray(day), dtype=torch.int64, device=dev)
+    assert day_t is None or day_t.shape == (n,), 'day must be (N,)'
     have_content = chars_t is not None or copys_t is not None
     rows = np.ones(n, bool) if rows is None else np.asarray(rows, bool)
     cols = np.ones(n, bool) if cols is None else np.asarray(cols, bool)
@@ -151,6 +157,10 @@ def artist_histograms(feats, labels, t_year, family, chars=None, copys=None, sca
             keys = [a * (GP * NB) + _P_ALL * NB + b]
             ok = st >= 0
             keys.append(a[ok] * (GP * NB) + st[ok] * NB + b[ok])
+            if day_t is not None:
+                di, dj = day_t[rr[ii]], day_t[cc[jj]]
+                xd = (st == 0) & (di >= 0) & (dj >= 0) & (di != dj)
+                keys.append(a[xd] * (GP * NB) + _P_XDAY * NB + b[xd])
             if have_content:
                 ov = torch.zeros(len(ii), dtype=torch.bool, device=dev)
                 for tg in (chars_t, copys_t):

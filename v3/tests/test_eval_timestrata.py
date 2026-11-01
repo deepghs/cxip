@@ -167,3 +167,54 @@ def test_fractional_weights_below_one_are_scale_invariant():
     pos = np.zeros(T.N_BINS); neg = np.zeros(T.N_BINS); pos[9000] = 0.3; neg[3000] = 500.0
     m = T.curve_metrics(pos, neg, 1.0, 0.0)
     assert m['recall_at_best'] == 1.0 and m['best_f1'] == 1.0 and m['n_pos_pairs'] == 0.3
+
+
+# ---- Task 16 (A2): same-day-excluded <1y stratum ------------------------------------------------------------------
+def _sameday_set(seed=5):
+    """10 artists x 24 images inside one year; 4 images per original day share a day-specific vector, so same-day
+    pairs are more similar than other same-artist pairs"""
+    rng = np.random.default_rng(seed)
+    n_art, per = 10, 24
+    lab = np.repeat(np.arange(n_art), per)
+    day = np.arange(len(lab)) // 4 + 10000                         # 6 days per artist, 4 images each
+    t = 2020 + (day - 10000) / 365.25 * 10                          # all within one year
+    d = 16
+    f = (rng.standard_normal((n_art, d))[lab] * 1.0 + rng.standard_normal((day.max() + 1 - 10000, d))[day - 10000]
+         * 1.5 + rng.standard_normal((len(lab), d)) * 1.2)
+    fam = np.arange(len(lab))
+    fam[1::24] = fam[0::24]                                         # one same-family pair per artist (stays excluded)
+    return f, lab, t, fam, day
+
+
+def test_xday_group_counts_and_lower_pr_auc():
+    f, lab, t, fam, day = _sameday_set()
+    assert '<1y_xday' in T.POS_GROUPS
+    h = T.artist_histograms(f, lab, t, fam, day=day, scale=10, bias=-5)
+    g = T.POS_GROUPS.index('<1y_xday')
+    iu = np.triu_indices(len(lab), 1)
+    i, j = iu
+    base = (lab[i] == lab[j]) & (fam[i] != fam[j]) & (np.abs(t[i] - t[j]) < 1.0)
+    assert h.pos[:, T.POS_GROUPS.index('<1y')].sum() == base.sum()
+    assert h.pos[:, g].sum() == (base & (day[i] != day[j])).sum() > 0
+    for a in range(10):                                             # per artist too
+        assert h.pos[a, g].sum() == (base & (day[i] != day[j]) & (lab[i] == a)).sum()
+    s = T.stratified_metrics(h)
+    assert s['<1y_xday']['pr_auc'] < s['<1y']['pr_auc']
+    # chunking invariance with day
+    h2 = T.artist_histograms(f, lab, t, fam, day=day, scale=10, bias=-5, chunk=7)
+    assert (h2.pos == h.pos).all() and (h2.neg == h.neg).all()
+
+
+def test_xday_group_empty_without_day_and_unknown_day_excluded():
+    f, lab, t, fam, day = _sameday_set()
+    h = T.artist_histograms(f, lab, t, fam)
+    assert h.pos[:, T.POS_GROUPS.index('<1y_xday')].sum() == 0
+    assert T.stratified_metrics(h)['<1y_xday'] is None
+    d2 = day.copy(); d2[:24] = -1                                   # artist 0: unknown days -> left out
+    h2 = T.artist_histograms(f, lab, t, fam, day=d2)
+    g = T.POS_GROUPS.index('<1y_xday')
+    assert h2.pos[0, g].sum() == 0 and h2.pos[1, g].sum() > 0
+    # other groups do not depend on day
+    h3 = T.artist_histograms(f, lab, t, fam, day=day)
+    keep = [k for k, x in enumerate(T.POS_GROUPS) if x != '<1y_xday']
+    assert (h3.pos[:, keep] == h.pos[:, keep]).all() and (h3.neg == h.neg).all()

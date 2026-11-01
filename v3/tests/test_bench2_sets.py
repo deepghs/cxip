@@ -31,8 +31,9 @@ def test_load_index_set_pread(tmp_path, monkeypatch):
 
 
 def test_sealed_never_in_regular_sets():
-    for name in ('bench2_b1', 'bench2_b2', 'bench2_b3p1', 'bench2_b3p2'):
+    for name in ('bench2_b1', 'bench2_b2'):
         assert evalsets.INDEX_SETS[name] != evalsets.INDEX_SETS[name + '_sealed']
+    assert not any('b3p' in k for k in evalsets.INDEX_SETS)          # Task 16: B3 (Pixiv) left the benchmark surface
 
 
 # ---------------------------------------------------------------------------------------------- synthetic helpers

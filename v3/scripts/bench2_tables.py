@@ -1,11 +1,14 @@
 """benchmark v2 结果 JSON (v3.scripts.bench2_eval --out) -> 报告用的 markdown 表 (中文表头, 指标比 bench2_eval 的
 markdown 全). 每个 B 集合一张主表 (各模型 point [lo, hi] + 相对第一个模型的配对 diff), dev 结果另有聚类表.
 
-阈值迁移表: 在指定集合之间取 threshold_transfer[模型]['drift']['cross_f1_loss'] 的逐对最大值 (可去掉无效集合,
-如 B3-P2), 并列出各集合的默认阈值 F1 / best F1 / 默认阈值下的 FPR.
+主表默认跳过 B3 集合 (bench2_b3p1 / bench2_b3p2; v4 不用 Pixiv, 报告 §6.1; 只有 Task 16 之前的旧 JSON 里有).
 
-G2 修正 (--g2fix): 不重跑评测, 用已有 JSON 里逐对的 cross_f1_loss 在 G2 集合 (默认 bench2.G2_SETS, 不含 B3-P2)
-之间重算 max_cross_f1_loss, 去掉无效的 B3 集合 (Pixiv 来源无效, 报告 §6.1), 按 bench2_eval 的 markdown 格式写新文件.
+阈值迁移表: 在指定集合之间取 threshold_transfer[模型]['drift']['cross_f1_loss'] 的逐对最大值 (可去掉无效集合),
+并列出各集合的默认阈值 F1 / best F1 / 默认阈值下的 FPR. g2_table: G2 的 max_cross_f1_loss (新 JSON 带按画师 bootstrap 的
+CI 和相对第一个模型的配对差; 旧 JSON 只有点估计).
+
+G2 修正 (--g2fix, 只用于 Task 16 之前的旧 JSON): 不重跑评测, 用已有 JSON 里逐对的 cross_f1_loss 在 G2 集合
+(默认 bench2.G2_SETS) 之间重算 max_cross_f1_loss, 去掉无效的 B3 集合 (报告 §6.1), 按 bench2_eval 的 markdown 格式写新文件.
 
 用法: python -m v3.scripts.bench2_tables results_test.json [bench2_b1 bench2_b2 ...]
       python -m v3.scripts.bench2_tables results_test.json --transfer bench2_b1 bench2_b2 csip_eval_public
@@ -19,12 +22,15 @@ import sys
 from pathlib import Path
 
 NAMES = {'v3_release': 'v3 发布版', 'v3_x4': 'v3 x4', 'kaloscope': 'Kaloscope'}
-ROWS = ('pr_auc/<1y', 'pr_auc/1-3y', 'pr_auc/3-6y', 'pr_auc/>=6y', 'pr_auc/all', 'pr_auc/<1y/reweighted',
-        'pr_auc/1-3y/reweighted', 'pr_auc/>=6y/reweighted', 'recall@1e-3/<1y', 'recall@1e-3/1-3y', 'recall@1e-3/>=6y',
-        'map_at_r/1y', 'r1/1y', 'map_at_r/any', 'ap/<1y', 'drift_spearman_median', 'date_mae', 'date_hit1y',
-        'date_mae_content', 'date_mae_baseline', 'date_mae_upload_only', 'inject_auroc/near_style',
+ROWS = ('pr_auc/<1y', 'pr_auc/<1y_xday', 'pr_auc/1-3y', 'pr_auc/3-6y', 'pr_auc/>=6y', 'pr_auc/all',
+        'pr_auc/<1y/reweighted', 'pr_auc/<1y_xday/reweighted', 'pr_auc/1-3y/reweighted', 'pr_auc/>=6y/reweighted',
+        'recall@1e-3/<1y', 'recall@1e-3/<1y_xday', 'recall@1e-3/1-3y', 'recall@1e-3/>=6y', 'recall@1e-4/<1y',
+        'recall@1e-4/<1y_xday', 'map_at_r/1y', 'r1/1y', 'map_at_r/any', 'ap/<1y', 'drift_spearman_median', 'date_mae',
+        'date_hit1y', 'date_mae_content', 'date_mae_baseline', 'date_mae_upload_only', 'inject_auroc/near_style',
         'inject_auroc/same_char', 'inject_auroc/far_period', 'inject_auroc/bad_date', 'cross_content_recall',
-        'same_char_fpr', 'same_copy_fpr')
+        'same_char_fpr', 'same_copy_fpr', 'overall_fpr@fpr1e-3', 'cross_content_recall@fpr1e-3',
+        'same_char_fpr@fpr1e-3', 'same_copy_fpr@fpr1e-3', 'same_char_ratio@fpr1e-3')
+B3_SETS = ('bench2_b3p1', 'bench2_b3p2')        # 只在旧 JSON 里出现; 主表和 G2 修正都去掉
 
 
 def _num(x, signed=False) -> str:
@@ -51,7 +57,7 @@ def render(res: dict, sets=None) -> str:
     ms = res['models']
     ref = ms[0]
     out = []
-    for s in (sets or list(res['sets'])):
+    for s in (sets or [k for k in res['sets'] if k not in B3_SETS]):
         if s not in res['sets']:
             continue
         S = res['sets'][s]
@@ -108,7 +114,26 @@ def transfer_table(res: dict, sets) -> str:
     return '\n'.join(out)
 
 
-B3_SETS = ('bench2_b3p1', 'bench2_b3p2')
+def _cell_p(v, signed=False) -> str:
+    s = _cell(v, signed)
+    if v and v.get('point') is not None and v.get('p_gt0') is not None:
+        s += f' p>0={v["p_gt0"]:.2f}'
+    return s
+
+
+def g2_table(res: dict) -> str:
+    """G2 的 max_cross_f1_loss: 各模型 point [lo, hi] + 相对第一个模型的配对差 (p>0 = 抽样中差 > 0 的比例);
+    旧 JSON 的浮点值只显示点估计"""
+    ms = res['models']
+    ref = ms[0]
+    tt = res.get('threshold_transfer', {})
+    stat = lambda v: v if v is None or isinstance(v, dict) else dict(point=float(v))
+    vals = [stat((tt.get(m) or {}).get('max_cross_f1_loss')) for m in ms]
+    head = [_name(m) for m in ms] + [f'{_name(m)} − {_name(ref)}' for m in ms[1:]]
+    row = [_cell(v) for v in vals]
+    row += [_cell_p((tt.get('diff', {}).get(f'{m}-vs-{ref}') or {}).get('max_cross_f1_loss'), True) for m in ms[1:]]
+    return '\n'.join(['| 指标 | ' + ' | '.join(head) + ' |', '|' + '-|' * (len(head) + 1),
+                      f'| G2 最大跨集 F1 损失 ({res["split"]}) | ' + ' | '.join(row) + ' |'])
 
 
 def regate_g2(res: dict, g2_sets=None) -> dict:
@@ -119,6 +144,8 @@ def regate_g2(res: dict, g2_sets=None) -> dict:
     out['sets'] = {k: v for k, v in out['sets'].items() if k not in B3_SETS}
     mx = max_cross_loss(res, g2_sets)
     for m, t in out.get('threshold_transfer', {}).items():
+        if m == 'diff':
+            continue
         have = set((t.get('per_set') or {}))
         t['max_cross_f1_loss'] = mx[m][0]
         t['max_cross_f1_loss_pair'] = mx[m][1]
@@ -130,8 +157,9 @@ def regate_g2(res: dict, g2_sets=None) -> dict:
 def g2fix_markdown(res: dict, g2_sets=None) -> str:
     from v3.scripts.bench2_eval import markdown
     r = regate_g2(res, g2_sets)
-    sets = next(iter(r['threshold_transfer'].values()), {}).get('max_cross_f1_loss_sets', [])
-    pairs = ', '.join(f'{_name(m)}: {t["max_cross_f1_loss_pair"]}' for m, t in r['threshold_transfer'].items())
+    sets = next((t for m, t in r['threshold_transfer'].items() if m != 'diff'), {}).get('max_cross_f1_loss_sets', [])
+    pairs = ', '.join(f'{_name(m)}: {t["max_cross_f1_loss_pair"]}' for m, t in r['threshold_transfer'].items()
+                      if m != 'diff')
     note = (f'> G2 修正版 (由已有 JSON 重算, 未重跑评测): max_cross_f1_loss 只在 {", ".join(sets)} 之间取最大; '
             f'B3 集合 (Pixiv 来源无效) 已去掉, b3p1_f1_loss 无效. 原 .md 的 G2 数值含 B3-P2, 已作废. 最差对: {pairs}')
     return note + '\n\n' + markdown(r)
@@ -147,6 +175,7 @@ if __name__ == '__main__':
         out.write_text(g2fix_markdown(res, args[2:] or None) + '\n')
         print(out.read_text())
     elif args[:1] == ['--transfer']:
+        print(g2_table(res) + '\n')
         print(transfer_table(res, args[1:]))
     else:
         print(render(res, args or None))

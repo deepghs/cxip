@@ -1,5 +1,9 @@
 """pixiv-artist-v1: Pixiv works that are not on Danbooru, labelled by artist (CSIP v4 training data).
 
+Unused in v4: the s1 source is an AI-image corpus (see docs/csip_v4_p0_baseline_zh.md §6.1). Pixiv was dropped
+from CSIP v4 at the P0 checkpoint (2026-11-01); the s1 / pixiv-artist-v1 data it produced has been deleted.
+Kept only as a record of what was run.
+
 Source: the s1 Pixiv tars (``PIXIV_RAW``) plus the work / account tables from ``v3/data/pixiv_meta.py``. Kept: works not
 on Danbooru of (a) accounts mapped to a current Danbooru artist name and (b) pure-Pixiv accounts (no Danbooru
 counterpart) with >= 30 works. Class name = mapped Danbooru artist name, or ``pixiv:{user_id}``. Accounts linked to the

@@ -5,22 +5,23 @@
       [--split dev|test] [--n-boot 1000] [--sets bench2_b1 bench2_b2] [--g2-sets ...] --out res.json [--md res.md]
 第一个 --model 是参照模型 (diff 列 = 其他模型 - 参照). 某集合缺特征文件 (FEATS_DIR/<集合>.npz) 时该集合跳过并注明.
 markdown: 每个 B 集合一张表, 行 = 主指标, 列 = 各模型 (point [lo, hi]) + 每个非参照模型的 diff 列;
-最后一张表是运行级的阈值迁移指标 (max_cross_f1_loss 等, 只有点估计).
+最后一张表是运行级的阈值迁移指标 (G2 的 max_cross_f1_loss, 按画师 bootstrap 的 CI + 配对差; 旧 JSON 只有点估计).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
 from v3.eval import bench2
 
-MAIN = ('pr_auc/<1y', 'pr_auc/1-3y', 'pr_auc/>=6y', 'map_at_r/1y', 'ap/<1y', 'date_mae', 'inject_auroc/bad_date',
-        'same_char_fpr')
-RUN_LEVEL = ('max_cross_f1_loss', 'b3p1_f1_loss')
-# 默认只跑 B1 / B2: B3 (bench2_b3p1 / bench2_b3p2) 的 Pixiv 来源无效 (报告 §6.1), 仍可用 --sets 显式指定
+MAIN = ('pr_auc/<1y', 'pr_auc/<1y_xday', 'pr_auc/1-3y', 'pr_auc/>=6y', 'map_at_r/1y', 'ap/<1y', 'date_mae',
+        'inject_auroc/bad_date', 'same_char_fpr', 'same_char_fpr@fpr1e-3', 'same_char_ratio@fpr1e-3')
+RUN_LEVEL = ('max_cross_f1_loss',)
+# v4 只有 B1 / B2 (Pixiv / B3 已去掉, 报告 §6.1)
 SETS = ('bench2_b1', 'bench2_b2')
 LEGACY = ('test100_0918', 'csip_eval_public', 'csip_unseen_v1')
 
@@ -43,6 +44,13 @@ def _cell(v: dict | None, signed=False) -> str:
     return s
 
 
+def _as_stat(v) -> dict | None:
+    """运行级指标: 新 JSON 为 {point, lo, hi, n_valid}, 旧 JSON 为浮点数"""
+    if v is None or isinstance(v, dict):
+        return v
+    return dict(point=float(v))
+
+
 def markdown(res: dict) -> str:
     names = res['models']
     ref = names[0]
@@ -62,12 +70,16 @@ def markdown(res: dict) -> str:
         lines.append('')
     tt = res.get('threshold_transfer', {})
     if tt:
-        lines += ['### threshold transfer (run level, point only)', '',
+        lines += ['### threshold transfer (run level; G2 CI = artist bootstrap of B1 / B2, csip_eval_public fixed)', '',
                   '| metric | ' + ' | '.join(head) + ' |', '|' + '-|' * (len(head) + 1)]
         for k in RUN_LEVEL:
-            vals = [tt.get(m, {}).get(k) for m in names]
-            row = [_num(v) for v in vals]
-            row += [_num(v - vals[0], signed=True) if v is not None and vals[0] is not None else '—' for v in vals[1:]]
+            vals = [_as_stat(tt.get(m, {}).get(k)) for m in names]
+            row = [_cell(v) for v in vals]
+            for m, v in zip(names[1:], vals[1:]):
+                d = tt.get('diff', {}).get(f'{m}-vs-{ref}', {}).get(k)
+                if d is None and v and vals[0] and v.get('point') is not None and vals[0].get('point') is not None:
+                    d = dict(point=v['point'] - vals[0]['point'])               # 旧 JSON: 只有点估计之差
+                row.append(_cell(d, signed=True))
             lines.append(f'| {k} | ' + ' | '.join(row) + ' |')
         lines.append('')
     if res.get('skipped'):
@@ -97,10 +109,12 @@ def main(argv=None):
     ap.add_argument('--out', required=True)
     ap.add_argument('--md')
     a = ap.parse_args(argv)
+    taken = [x for x in (a.out, a.md) if x and (Path(x).exists() or Path(x).is_symlink())]
+    if taken:
+        sys.exit(f'refusing to overwrite existing {taken}; write new files')
     from v3.scripts.csip_full_eval import load_aligned
 
-    need = list(dict.fromkeys(
-        [s for name in a.sets for s in (('bench2_b1', name) if name == bench2.CROSS_SET else (name,))] + a.legacy))
+    need = list(dict.fromkeys(list(a.sets) + a.legacy))
     have = {name: {s for s in need if (Path(fdir) / f'{s}.npz').exists()} for name, fdir, *_ in a.model}
     dfs = {s: bench2.load_set(s)[0] for s in need if any(s in h for h in have.values())}   # 只读有特征的集合, 只读一次
     models = []

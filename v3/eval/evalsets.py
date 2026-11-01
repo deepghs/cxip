@@ -25,9 +25,11 @@ OPENSET = EVAL_ROOT / 'ccip_openset_v1'
 CROSSCHAR = EVAL_ROOT / 'csip_crosschar_v1'
 # index.parquet 形式的评测集 (path, label_name, label, sample_key); csip_unseen_v1 见 v3/scripts/build_csip_unseen.py
 INDEX_SETS = {'csip_unseen_v1': Path('/data/neko/cxip_v3/data/csip_unseen_v1')}
-# benchmark v2 (v3/data/bench2_sets.py): 常规名字只含 dev / test 行, sealed 行在单独的 *_sealed 目录
+# benchmark v2 (v3/data/bench2_sets.py): 常规名字只含 dev / test 行, sealed 行在单独的 *_sealed 目录.
+# B3 (b3p1 / b3p2, Pixiv) 不再注册: v4 不用 Pixiv, s1 来源是 AI 图语料库 (docs/csip_v4_p0_baseline_zh.md §6.1);
+# BENCH2/{b3p1,b3p2}{,_sealed} 的 index 仍在磁盘上 (指向已删除的 tar), 只作记录.
 BENCH2 = Path('/scratch/cxip_v4/data/bench2_v1')
-for _s in ('b1', 'b2', 'b3p1', 'b3p2'):
+for _s in ('b1', 'b2'):
     INDEX_SETS[f'bench2_{_s}'] = BENCH2 / _s
     INDEX_SETS[f'bench2_{_s}_sealed'] = BENCH2 / f'{_s}_sealed'
 ISEK_GLOB = '/data/.hf/hub/datasets--isek-ai--danbooru-tags-2024/snapshots/*/data/*.parquet'

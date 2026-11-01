@@ -1,6 +1,11 @@
 """Benchmark v2 evaluation sets B1 / B2 / B3-P1 / B3-P2 (CSIP v4 P0): pick images, write index parquets, make the
 cleaning-injection folders.
 
+The B3-P1 / B3-P2 sets (bench2_b3p1 / bench2_b3p2 and their _sealed dirs) are unused in v4: the s1 source is an
+AI-image corpus (see docs/csip_v4_p0_baseline_zh.md §6.1). Pixiv was dropped from CSIP v4 at the P0 checkpoint
+(2026-11-01); the B3 index parquets still on disk point into deleted tars and are not registered in
+v3.eval.evalsets.INDEX_SETS. The B1 / B2 parts are in use.
+
 The sets are index parquets that point into the existing danbooru-artist-v2 / pixiv-artist-v1 tars
 (path = tar, offset = data offset inside the tar, size); no image is copied.
 

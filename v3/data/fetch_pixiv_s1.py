@@ -1,5 +1,9 @@
 """Download the pixiv s1 webp tars (hub dataset ``pixiv_ai_s1-webp-4Mpixel``) used by pixiv-artist-v1 and bench B3.
 
+Unused in v4: the s1 source is an AI-image corpus (see docs/csip_v4_p0_baseline_zh.md §6.1). Pixiv was dropped
+from CSIP v4 at the P0 checkpoint (2026-11-01); the s1 / pixiv-artist-v1 data it produced has been deleted.
+Kept only as a record of what was run.
+
     python -m v3.data.fetch_pixiv_s1 index    # all images/NNNN.json (small)
     python -m v3.data.fetch_pixiv_s1 table    # merge the jsons -> raw/image_table.parquet (+ id-set check)
     python -m v3.data.fetch_pixiv_s1 tars     # all images/NNNN.tar, sha256-verified, resumable

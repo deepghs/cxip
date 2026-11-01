@@ -1,5 +1,9 @@
 """Pixiv s1 image -> artwork -> account tables for CSIP v4 (feeds the benchmark splits and pixiv-artist-v1).
 
+Unused in v4: the s1 source is an AI-image corpus (see docs/csip_v4_p0_baseline_zh.md §6.1). Pixiv was dropped
+from CSIP v4 at the P0 checkpoint (2026-11-01); the s1 / pixiv-artist-v1 data it produced has been deleted.
+Kept only as a record of what was run.
+
 works.parquet    one row per usable s1 image (type illust, illust_ai_type != 2, not ugoira).
 accounts.parquet one row per account that owns at least one usable s1 image; maps the account to a Danbooru artist
                  (current tag name) when the artworks they share on Danbooru point to exactly one artist.

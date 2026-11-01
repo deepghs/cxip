@@ -1,5 +1,10 @@
 """Benchmark v2 artist / account splits and training exclusion lists (CSIP v4 P0).
 
+The B3-P2 split and the Pixiv exclusion lists (b3p2, b3p1_accounts, exclude_pixiv_users) are unused in v4: the s1
+source is an AI-image corpus (see docs/csip_v4_p0_baseline_zh.md §6.1). Pixiv was dropped from CSIP v4 at the P0
+checkpoint (2026-11-01); the B3 index parquets still on disk point into deleted tars and are not registered in
+v3.eval.evalsets.INDEX_SETS. The B1 / B2 parts are in use.
+
 B1  = every 0918 test artist (dev / test / sealed, stratified by career span, test100 forced into test)
 B2  = artists unseen by v1, Kaloscope and every public eval set (n_local >= 30), 200 per span stratum, then dev/test/sealed
 B3-P2 = pixiv-only accounts (n_works >= 30), sampled and split 100 / 100 / 100
