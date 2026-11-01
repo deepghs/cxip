@@ -1224,14 +1224,16 @@ CUDA_VISIBLE_DEVICES=6 PYTHONPATH=. $PY -m v3.scripts.eval_kaloscope --sets $S
 
 **Plan 2：阶段 0、漂移估计、v4 训练 (spec §4.2-4.6、§6 的 P1-P3)**
 
+> 2026-11-01 P0 检查点：v4 不用 Pixiv (s1 是 AI 图语料库，见 `docs/csip_v4_p0_baseline_zh.md` §6.1)。下表已去掉 Pixiv 数据合并、Pixiv 采样规则和消融 A7；训练只用 danbooru-artist-v2。P1 前置事项 (G2 的 CI、排除同日对的 <1 年层、相同总体 FPR 下的内容指标、去掉 B3) 已在 Task 16 完成。
+
 | 部分 | 内容 |
 |-|-|
-| 数据合并 | `load_train_df` 支持 danbooru-artist-v2 + pixiv-artist-v1 按类名合并 |
-| 采样器 | `PKBatchSampler` 加 "时间轴分散" 模式：K 张中一半在锚点 1 年内、一半更远；Pixiv 每作品每 epoch 最多 2 页 |
+| 数据 | `load_train_df` 读 danbooru-artist-v2 (train_ge30 / train_ge10 index) |
+| 采样器 | `PKBatchSampler` 加 "时间轴分散" 模式：K 张中一半在锚点 1 年内、一半更远 |
 | 损失 | `GatheredSigLIP` 支持软目标：all-gather 每样本的 (label, t_year, family, curve_id)，按查找表算 y = r(\|Δt\|)，同族的对权重为 0 |
 | 阶段 0 配置 | 1 年窗口，忽略远对 |
 | 漂移估计 | `v3/eval/drift.py`：同日合并、仅彩色、内容控制、等渗回归、经验贝叶斯收缩，输出查找表 |
-| 消融配置 | A0-A7 (A3g / A3a)，各约 1M 样本 @384 |
+| 消融配置 | A0-A6 (A3g / A3a)，各约 1M 样本 @384 |
 | 扩量与长训 | 扩量曲线和最终长训 |
 | 评测接入 | 每个实验都用本计划的 `bench2_eval` 在 dev 上评测 |
 
