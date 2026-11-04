@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Gradio demo for AnimeCCIP-v3 / AnimeCSIP-v3 (one app, picked by MODEL_REPO).
 
 Compare two images, or rank query images against a few reference images. Scores are the model's calibrated logits:

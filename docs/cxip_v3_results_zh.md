@@ -626,3 +626,8 @@ dft_char1 在 200k 时训练内 t100 已降到 0.40，提前停掉。
 - 模型: `deepghs-cv/AnimeCCIP-v3`, `deepghs-cv/AnimeCSIP-v3` (private), 与 hub.deepghs.org 发布版相同 (sha256 全部一致, CCIP 23 / CSIP 26 个文件)。README 改动: 去掉 `HF_ENDPOINT`、repo id 改为 deepghs-cv、去掉 `base_model` (HF 上没有 deepghs/AnimeDINOv3-timm)、加 Space 链接。脚本 `v3/scripts/publish_hf_cv.py {check,models,readme,spaces,test}`, token 用 env.sh 的 `HFCO_TOKEN`。
 - Demo: `7eu7d7/AnimeCCIP-v3`, `7eu7d7/AnimeCSIP-v3` (private, ZeroGPU)。app 源码 `v3/release_space/app.py` (两个 Space 共用, 用 Space 变量 `MODEL_REPO` 选模型; Space secret `HF_TOKEN` 读私有模型)。功能: 两图对比 (分数 / 判定 / 近似概率, CSIP 注明校准随来源变化) 和参考图排序 (按对参考图的平均 logit)。示例图为画师 x 角色对照的 9 张 (匿名)。线上验证: 结果与本地一致 (bf16 误差内), 首次调用约 2-5 s。
 - 为什么放个人账号: huggingface.co 2026-07 起, 组织新建 Gradio/Docker Space (含免费 cpu-basic 和 ZeroGPU) 需要 Team/Enterprise (deepghs-cv 与 deepghs 都实测 402), 旧 Space 保留运行; 免费个人账号可有 2 个 ZeroGPU Gradio Space。备选: 自有 GPU + Cloudflare Tunnel、魔搭创空间 xGPU、Modal。
+
+### 开源协议变更 (2026-11-04)
+
+- 应用户要求由 CC BY-NC 4.0 改为: **模型权重及其他模型文件 CC BY-SA 4.0** (`LICENSE_WEIGHTS`), **代码 AGPL-3.0** (`LICENSE_CODE`; `v3/release/*.py` 与 `v3/release_space/app.py` 加 `SPDX-License-Identifier: AGPL-3.0-only`)。`DINOv3_LICENSE.md` 保留 (AnimeDINOv3 训练时用 DINOv3 ViT-7B 作 teacher)。
+- 已更新: hub.deepghs.org `deepghs/AnimeC{C,S}IP-v3` 与 huggingface.co `deepghs-cv/AnimeC{C,S}IP-v3` (元数据 `license: cc-by-sa-4.0`, README License 一节, 两份协议全文, 代码头), Space `7eu7d7/AnimeC{C,S}IP-v3` (`license: agpl-3.0` + LICENSE)。全部 sha256 核对一致, 仍为 private; Space 重建后线上结果不变。改前 README 备份 `_analysis/README_{ccip,csip}_before_license.md`。
