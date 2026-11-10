@@ -10,6 +10,7 @@
 另外: 两个集合之间的阈值迁移 (一个阈值全局部署的 F1 损失)、Matryoshka 前缀维度 (--matryoshka)、
 0918 上按年份差 / 媒介 / 同角色分桶的召回与误报 (csip_error_analysis)。
 --erase: 先对特征做 x @ M + b (事后线性擦除, posthoc_kc*_kh*.pt) 再评测。
+[--sets csip_unseen_v1 ...] (默认两个旧集合; 不含 0918 时跳过分桶)
 用法: python -m v3.scripts.csip_full_eval --name x2_erased --feats-dir <exp>/eval_native/feats --scale S --bias B
       [--erase <exp>/eval/posthoc_kc3_kh4.pt] [--matryoshka] --out <json>
 """
@@ -68,11 +69,12 @@ def main():
     ap.add_argument('--erase')
     ap.add_argument('--matryoshka', action='store_true')
     ap.add_argument('--out', required=True)
+    ap.add_argument('--sets', nargs='+', default=list(SETS))
     args = ap.parse_args()
     erase = torch.load(args.erase, weights_only=True) if args.erase else None
     out = dict(name=args.name, feats_dir=args.feats_dir, erase=args.erase, sets={}, summary={})
     full = {}
-    for name in SETS:
+    for name in args.sets:
         t0 = time.time()
         df, _ = load_set(name)
         f = load_aligned(args.feats_dir, name, df, erase)
@@ -96,8 +98,11 @@ def main():
         out['sets'][name] = {k: v for k, v in r.items() if k != 'curve'}
         print(name, json.dumps({k: round(v, 4) if isinstance(v, float) else v
                                 for k, v in out['summary'][name].items()}), f'{time.time() - t0:.0f}s', flush=True)
-    out['threshold_drift'] = pairwise.threshold_drift(full)
+    if len(full) > 1:
+        out['threshold_drift'] = pairwise.threshold_drift(full)
     Path(args.out).write_text(json.dumps(out, indent=1, default=float))
+    if 'test100_0918' not in args.sets:
+        return
     # 0918 分桶 (年份差 / 媒介 / 同角色 / 同作品)
     od = Path(args.out).parent
     df, _ = load_set('test100_0918')
@@ -114,7 +119,7 @@ def main():
     out['buckets_0918'] = {k: dict(recall=v.get('pos', {}).get('rate_above'), fp=v.get('neg', {}).get('rate_above'))
                            for k, v in e.items()}
     Path(args.out).write_text(json.dumps(out, indent=1, default=float))
-    print('drift', json.dumps(out['threshold_drift'], default=float)[:300])
+    print('drift', json.dumps(out.get('threshold_drift'), default=float)[:300])
 
 
 if __name__ == '__main__':

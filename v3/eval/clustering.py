@@ -11,6 +11,7 @@ UMAP 不可用或 reduce='pca' 时用 PCA(35) (L2 归一化后), reduce='none' �
 from __future__ import annotations
 
 import time
+import warnings
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -20,6 +21,8 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 def reduce_features(feats, method='umap', n_components=35, n_neighbors=11, min_dist=0.0, seed=0, n_jobs=None):
     X = np.asarray(feats, dtype=np.float32)
     X = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+    if method is None:      # reduce=None: 直接在 L2 归一化特征上 HDBSCAN
+        method = 'none'
     if method == 'umap':
         try:
             import umap
@@ -95,18 +98,104 @@ def cluster_metrics(y_true, y_pred) -> dict:
 
 
 def clustering_eval(feats, labels, reduce='umap', mcs_range=range(2, 8), seed=0, n_components=35, n_neighbors=11,
-                    min_dist=0.0, select='nmi', n_jobs=32) -> dict:
-    """扫 min_cluster_size, 返回每个 mcs 的指标和按 select (nmi) 选出的最佳"""
+                    min_dist=0.0, select='nmi', n_jobs=32, return_pred=False) -> dict:
+    """扫 min_cluster_size, 返回每个 mcs 的指标和按 select (nmi) 选出的最佳. return_pred=True 时多给最佳 mcs 的预测标签 pred_labels"""
     t0 = time.time()
     X, used = reduce_features(feats, reduce, n_components, n_neighbors, min_dist, seed)
     t_reduce = time.time() - t0
-    per = {}
+    per, preds = {}, {}
     for mcs in mcs_range:
-        per[int(mcs)] = cluster_metrics(labels, hdbscan_labels(X, int(mcs), n_jobs))
+        preds[int(mcs)] = hdbscan_labels(X, int(mcs), n_jobs)
+        per[int(mcs)] = cluster_metrics(labels, preds[int(mcs)])
     best_mcs = max(per, key=lambda k: per[k][select])
     out = dict(reduce=used, n_components=int(X.shape[1]), seed=seed, n_images=int(len(labels)),
                n_classes=int(len(np.unique(labels))), best_mcs=best_mcs, select=select,
                **{k: v for k, v in per[best_mcs].items()},
                best_nmi=max(v['nmi'] for v in per.values()), best_ari=max(v['ari'] for v in per.values()),
                per_mcs={str(k): v for k, v in per.items()}, seconds_reduce=t_reduce, seconds=time.time() - t0)
+    if return_pred:
+        out['pred_labels'] = preds[best_mcs]
+    return out
+
+
+def _singletonize(y):
+    """-1 (噪声 / 干扰图) 各自成单例类"""
+    y = np.asarray(y).copy()
+    m = y == -1
+    y[m] = y.max() + 1 + np.arange(int(m.sum()))
+    return y
+
+
+def bcubed(y_true, y_pred) -> dict:
+    """BCubed precision / recall / F. 预测噪声 (-1) 视为各自独立的单例簇; y_true 为 -1 的干扰图也是单例真类."""
+    yt, yp = _singletonize(y_true), _singletonize(y_pred)
+    if len(yt) == 0:
+        return dict(precision=0.0, recall=0.0, f=0.0)
+    _, t = np.unique(yt, return_inverse=True)
+    _, p = np.unique(yp, return_inverse=True)
+    t, p = t.reshape(-1), p.reshape(-1)
+    pair = p.astype(np.int64) * (t.max() + 1) + t
+    _, pair_inv, pair_cnt = np.unique(pair, return_inverse=True, return_counts=True)
+    both = pair_cnt[pair_inv.reshape(-1)]                  # 同预测簇且同真类的点数 (含自身)
+    prec = float(np.mean(both / np.bincount(p)[p]))
+    rec = float(np.mean(both / np.bincount(t)[t]))
+    f = 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)
+    return dict(precision=prec, recall=rec, f=f)
+
+
+def mixed_pool_clustering(feats, labels, n_pools=5, n_artists=100, max_per_artist=40, n_distractors=1000, seed=0,
+                          mcs_range=range(2, 8), reduces=('umap', None), n_jobs=32, **eval_kw) -> dict:
+    """混合池聚类 (benchmark v2): 每个池抽 n_artists 个画师 (每人至多 max_per_artist 张) 作真类, 再从其余画师抽
+    n_distractors 张图作干扰 (真标签 -1, 即单例). 小集合时 n_artists 钳到 min(n_artists, A//2), 干扰从其余画师取.
+    每个 reduce 模式 ('umap' / None=直接 HDBSCAN) 调 clustering_eval 扫 mcs, 用 nmi 选最佳 mcs, 报该 mcs 下
+    bcubed_f / ari 在各池的均值与标准差 (np.std, ddof=0; 聚类不做 bootstrap, 用池间标准差表示波动).
+    与 bcubed 同一口径: 真标签与预测里的噪声 (-1) / 干扰图都当各自独立的单例. mcs 用 nmi_noise_singleton 选
+    (clustering_eval 的 select), 报告的 ari / nmi 都是该口径 (预测噪声单例化); 噪声整体当一个簇的 ARI 另给
+    ari_noise_as_class (nmi 同理 nmi_noise_as_class).
+    返回 {mode_key: {...}, n_pools, n_artists, n_distractors, ...}; mode_key = 'umap' / 'none'.
+    """
+    labels = np.asarray(labels)
+    arts = np.unique(labels)
+    na = int(min(n_artists, len(arts) // 2))
+    if na < 1:
+        raise ValueError('need at least 2 artists')
+    modes = {('none' if r is None else r): r for r in reduces}
+    acc = {k: dict(bcubed_f=[], ari=[], ari_noise_as_class=[], nmi=[], nmi_noise_as_class=[], best_mcs=[], noise_frac=[])
+           for k in modes}
+    eval_kw = {'select': 'nmi_noise_singleton', **eval_kw}
+    n_img, n_dis = [], []
+    for pool in range(n_pools):
+        rng = np.random.default_rng([seed, pool])
+        pick = rng.permutation(arts)[:na]
+        rest = np.isin(labels, pick, invert=True)
+        idx = []
+        for a in pick:
+            ia = np.nonzero(labels == a)[0]
+            idx.append(rng.permutation(ia)[:max_per_artist])
+        idx = np.concatenate(idx)
+        di = rng.permutation(np.nonzero(rest)[0])[:n_distractors]
+        sel = np.concatenate([idx, di])
+        _, y = np.unique(labels[idx], return_inverse=True)
+        y_true = np.concatenate([y.reshape(-1), np.full(len(di), -1)])
+        y_eval = _singletonize(y_true)
+        n_img.append(len(sel)); n_dis.append(len(di))
+        for key, r in modes.items():
+            with warnings.catch_warnings():     # 单例标签多时 sklearn 会提示 "类数超过样本数一半"
+                warnings.filterwarnings('ignore', message='The number of unique classes is greater')
+                e = clustering_eval(np.asarray(feats)[sel], y_eval, reduce=r, mcs_range=mcs_range, seed=seed,
+                                    n_jobs=n_jobs, return_pred=True, **eval_kw)
+            a = acc[key]
+            a['bcubed_f'].append(bcubed(y_true, e['pred_labels'])['f'])
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='The number of unique classes is greater')
+                a['ari'].append(float(adjusted_rand_score(y_eval, _singletonize(e['pred_labels']))))
+            a['ari_noise_as_class'].append(e['ari'])
+            a['nmi'].append(e['nmi_noise_singleton']); a['nmi_noise_as_class'].append(e['nmi'])
+            a['best_mcs'].append(e['best_mcs']); a['noise_frac'].append(e['noise_frac'])
+            a['reduce'] = e['reduce']
+    out = dict(n_pools=int(n_pools), n_artists=na, n_distractors=int(min(n_dis)) if n_dis else 0,
+               n_images=[int(x) for x in n_img], seed=seed)
+    for key, a in acc.items():
+        out[key] = dict(a, **{f'{m}_{s}': float(fn(a[m])) for m in ('bcubed_f', 'ari', 'ari_noise_as_class', 'nmi', 'nmi_noise_as_class')
+                              for s, fn in (('mean', np.mean), ('std', np.std))})
     return out
